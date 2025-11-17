@@ -23,7 +23,7 @@ try {
   console.warn(`[FFmpeg] Error: ${error.message}`);
 }
 
-const { Client, GatewayIntentBits, Events, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ComponentType } = require('discord.js');
+const { Client, GatewayIntentBits, Events, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, ComponentType, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const config = require('./config.json');
 const { createWelcomeCard } = require('./utils/welcomeCard');
 const { validateConfig } = require('./utils/configValidator');
@@ -36,6 +36,7 @@ const MESSAGES = require('./src/config/messages');
 const CONSTANTS = require('./src/config/constants');
 const dataManager = require('./utils/dataManager');
 const musicHandlers = require('./commands/handlers/musicHandlers');
+const { safeDeferUpdate } = require('./utils/discordUtils');
 
 // Validar configuración al iniciar
 try {
@@ -121,6 +122,9 @@ const client = new Client({
   ],
 });
 
+// Expose client globally so utils/dataManager can detect bot ID
+global.client = client;
+
 // Evento cuando el bot está listo
 client.once(Events.ClientReady, async (c) => {
   console.log(`\n${EMOJIS.DRAGON}${EMOJIS.KATANA}═══════════════════════════════════════${EMOJIS.KATANA}${EMOJIS.DRAGON}`);
@@ -147,6 +151,223 @@ client.once(Events.ClientReady, async (c) => {
     console.error(`${EMOJIS.ERROR} Error inicializando sistema de datos:`, error);
     console.error(`${EMOJIS.WARNING} El bot continuará, pero los datos no se guardarán`);
   }
+
+  // TASK: Auto-purge old messages in specific channels. Read settings from config.json
+  const purgeConfig = (config && config.purge && typeof config.purge === 'object') ? config.purge : null;
+  const purgeEnabled = purgeConfig ? Boolean(purgeConfig.enabled) : false;
+  const CHANNEL_IDS = purgeConfig && Array.isArray(purgeConfig.channelIds) && purgeConfig.channelIds.length > 0
+    ? purgeConfig.channelIds.map(String)
+    : [];
+  const MS_INTERVAL = (purgeConfig && Number.isFinite(Number(purgeConfig.intervalHours)) ? Number(purgeConfig.intervalHours) : 24) * 60 * 60 * 1000;
+  const MS_CUTOFF = (purgeConfig && Number.isFinite(Number(purgeConfig.cutoffHours)) ? Number(purgeConfig.cutoffHours) : 24) * 60 * 60 * 1000;
+  const MAX_DELETES_PER_RUN = (purgeConfig && Number.isFinite(Number(purgeConfig.maxDeletesPerRun)) ? Number(purgeConfig.maxDeletesPerRun) : 0);
+  const RUN_HOUR = (purgeConfig && Number.isFinite(Number(purgeConfig.runHour)) ? Number(purgeConfig.runHour) : 9);
+  const INCLUDE_ALL = purgeConfig && Boolean(purgeConfig.includeAll);
+  const INCLUDE_PINNED = purgeConfig && Boolean(purgeConfig.includePinned);
+  const RUN_ON_STARTUP = purgeConfig && Boolean(purgeConfig.runOnStartup);
+  let isPurgeRunning = false;
+
+  const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+  const cleanOldMessagesInChannel = async (channel) => {
+    try {
+      // Delete messages according to config: if INCLUDE_ALL is true, delete all messages
+      // (optionally including pinned if INCLUDE_PINNED). Otherwise delete messages older than MS_CUTOFF.
+      let totalDeletedThisRun = 0;
+      while (true) {
+        const fetched = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+        if (!fetched || fetched.size === 0) break;
+
+        const now = Date.now();
+        // Determine eligible messages
+        const eligible = fetched.filter(m => {
+          if (!INCLUDE_PINNED && m.pinned) return false;
+          if (INCLUDE_ALL) return true;
+          return (now - m.createdTimestamp) > MS_CUTOFF;
+        });
+
+        const totalFound = fetched.size;
+        const totalToRemove = eligible.size;
+        console.log(`🧹 [Purge] Fetched ${totalFound} messages; ${totalToRemove} eligible for deletion in ${channel.name || channel.id}`);
+
+        if (totalToRemove === 0) {
+          console.log(`🧹 [Purge] No eligible messages to delete in channel ${channel.id}, stopping.`);
+          break;
+        }
+
+        // Prepare lists
+        const toBulk = [];
+        const toDeleteIndividually = [];
+        for (const msg of eligible.values()) {
+          const age = now - msg.createdTimestamp;
+          if (age < (14 * 24 * 60 * 60 * 1000)) toBulk.push(msg.id);
+          else toDeleteIndividually.push(msg.id);
+        }
+
+        // Respect max deletes per run (0 = unlimited)
+        const remainingAllowed = MAX_DELETES_PER_RUN > 0 ? Math.max(0, MAX_DELETES_PER_RUN - totalDeletedThisRun) : Infinity;
+        if (remainingAllowed === 0) {
+          console.log(`🧹 [Purge] Reached maxDeletesPerRun (${MAX_DELETES_PER_RUN}), stopping for channel ${channel.id}.`);
+          break;
+        }
+
+        // Attempt bulk deletion (up to remainingAllowed)
+        const bulkSlice = toBulk.slice(0, remainingAllowed === Infinity ? toBulk.length : Math.min(toBulk.length, remainingAllowed));
+        if (bulkSlice.length > 0) {
+          try {
+            const deleted = await channel.bulkDelete(bulkSlice, true).catch(() => null);
+            const deletedCount = deleted ? deleted.size : 0;
+            totalDeletedThisRun += deletedCount;
+            console.log(`🧹 [Purge] Bulk deleted ${deletedCount} msgs in #${channel.name || channel.id}`);
+          } catch (err) {
+            console.error('Error bulk deleting messages:', err);
+          }
+        }
+
+        // Recompute remaining allowed
+        const remainingAfterBulk = MAX_DELETES_PER_RUN > 0 ? Math.max(0, MAX_DELETES_PER_RUN - totalDeletedThisRun) : Infinity;
+
+        // Individually delete older messages or any remaining pinned (if bulk skipped them)
+        if (toDeleteIndividually.length > 0 && remainingAfterBulk !== 0) {
+          const individualToAttempt = toDeleteIndividually.slice(0, remainingAfterBulk === Infinity ? toDeleteIndividually.length : Math.min(toDeleteIndividually.length, remainingAfterBulk));
+          for (const id of individualToAttempt) {
+            try {
+              const m = await channel.messages.fetch(id).catch(() => null);
+              if (m) {
+                // If pinned and INCLUDE_PINNED is true, try to unpin first to ensure deletion
+                if (m.pinned && INCLUDE_PINNED) {
+                  try { await m.unpin().catch(() => {}); } catch (e) {}
+                }
+                await m.delete().catch(() => {});
+                totalDeletedThisRun += 1;
+              }
+            } catch (err) {
+              console.error('Error deleting individual message:', err);
+            }
+            if (MAX_DELETES_PER_RUN > 0 && totalDeletedThisRun >= MAX_DELETES_PER_RUN) break;
+          }
+          console.log(`🧹 [Purge] Individually deleted ${Math.min(individualToAttempt.length, totalDeletedThisRun)} msgs in #${channel.name || channel.id}`);
+        }
+
+        if (MAX_DELETES_PER_RUN > 0 && totalDeletedThisRun >= MAX_DELETES_PER_RUN) {
+          console.log(`🧹 [Purge] Reached maxDeletesPerRun (${MAX_DELETES_PER_RUN}) for channel ${channel.id}, stopping.`);
+          break;
+        }
+
+        await sleep(800);
+      }
+      console.log(`🧹 [Purge] Total deleted this run in ${channel.name || channel.id}: ${totalDeletedThisRun}`);
+    } catch (err) {
+      console.error(`Error cleaning channel ${channel.id}:`, err);
+    }
+  };
+
+  const runPurgeTask = async () => {
+    try {
+      if (!purgeEnabled) {
+        console.log('🧹 [Purge] Purge task is disabled in config.purge, skipping run.');
+        return;
+      }
+
+      if (!Array.isArray(CHANNEL_IDS) || CHANNEL_IDS.length === 0) {
+        console.log('🧹 [Purge] No channel IDs configured in config.purge.channelIds, skipping run.');
+        return;
+      }
+
+      for (const chId of CHANNEL_IDS) {
+        // Try to fetch channel from cache or API
+        let channel = client.channels.cache.get(chId);
+        if (!channel) {
+          try {
+            channel = await client.channels.fetch(chId).catch(() => null);
+          } catch (e) {
+            channel = null;
+          }
+        }
+
+        if (!channel) {
+          console.log(`⚠️ [Purge] Channel not found: ${chId}, skipping.`);
+          continue;
+        }
+
+        // Only text-based channels can have messages
+        if (!channel.isTextBased || !channel.isTextBased()) {
+          console.log(`⚠️ [Purge] Channel ${chId} is not a text channel, skipping.`);
+          continue;
+        }
+
+        // ensure we have permission to manage messages in that channel
+        const mePerms = channel.permissionsFor(client.user);
+        if (!mePerms || !mePerms.has('ManageMessages')) {
+          console.log(`⚠️ [Purge] Missing ManageMessages permission in channel ${chId}, skipping.`);
+          continue;
+        }
+
+        // Run cleaning for this channel (aggressively paging through messages)
+        await cleanOldMessagesInChannel(channel);
+      }
+    } catch (err) {
+      console.error('Error running purge task:', err);
+    }
+  };
+
+  // Run once on startup if configured
+  if (RUN_ON_STARTUP) {
+    runPurgeTask().catch(err => console.error('Initial purge failed:', err));
+  } else {
+    console.log('🧹 [Purge] Initial purge skipped (config.purge.runOnStartup is false)');
+  }
+
+  // Schedule according to config.runHour (local server time). Calculate next occurrence of RUN_HOUR.
+  const scheduleNextRunAtHour = () => {
+    const now = new Date();
+    const next = new Date(now);
+    next.setHours(RUN_HOUR, 0, 0, 0);
+    if (next <= now) {
+      // already passed today, schedule for tomorrow
+      next.setDate(next.getDate() + 1);
+    }
+    const delay = next.getTime() - now.getTime();
+    console.log(`🧹 [Purge] Next scheduled purge at local time: ${next.toString()}`);
+    setTimeout(async () => {
+      // run task if not already running
+      if (isPurgeRunning) {
+        console.log('🧹 [Purge] Previous purge still running; skipping this scheduled run.');
+      } else {
+        try {
+          isPurgeRunning = true;
+          await runPurgeTask();
+        } catch (err) {
+          console.error('Scheduled purge failed:', err);
+        } finally {
+          isPurgeRunning = false;
+        }
+      }
+
+      // After first scheduled run, set interval to MS_INTERVAL
+      setInterval(async () => {
+        if (isPurgeRunning) {
+          console.log('🧹 [Purge] Previous purge still running; skipping interval run.');
+          return;
+        }
+        try {
+          isPurgeRunning = true;
+          await runPurgeTask();
+        } catch (err) {
+          console.error('Scheduled purge failed:', err);
+        } finally {
+          isPurgeRunning = false;
+        }
+      }, MS_INTERVAL);
+    }, delay);
+  };
+
+  scheduleNextRunAtHour();
+
+  // Expose purge control to other parts of the bot (so slash commands can trigger it)
+  client.runPurgeTask = runPurgeTask;
+  client.isPurgeRunningFlag = () => isPurgeRunning;
+  client.setPurgeRunning = (v) => { isPurgeRunning = Boolean(v); };
 
   console.log(`\n${EMOJIS.FLAG} Código Bushido activado. El dojo está listo.\n`);
 });
@@ -209,7 +430,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
   // Verificar si la función de bienvenida está activada
   if (!config.welcome.enabled) return;
 
-  try {
+    try {
     // Obtener el canal de bienvenida
     const channel = member.guild.channels.cache.get(config.welcome.channelId);
 
@@ -221,11 +442,16 @@ client.on(Events.GuildMemberAdd, async (member) => {
     // Crear la tarjeta de bienvenida
     const attachment = await createWelcomeCard(member);
 
+    // Usar mención explícita para que el usuario reciba la alerta en el canal
+    const mention = `<@${member.user.id}>`;
+
     // Enviar el mensaje de bienvenida con lógica de reintento
-    const displayName = member.displayName || member.user.username;
     await sendWithRetry(channel, {
-      content: `${EMOJIS.CASTLE} ${MESSAGES.WELCOME.NEW_MEMBER(displayName)} ${EMOJIS.DRAGON}`,
+      content: `${EMOJIS.CASTLE} ${MESSAGES.WELCOME.NEW_MEMBER(mention)} ${EMOJIS.DRAGON}\n\n` +
+               `${MESSAGES.WELCOME.ROLE_ASSIGNED}\n` +
+               `${MESSAGES.WELCOME.WELCOME_CARD_SUBTITLE(member.guild.name)}`,
       files: [attachment],
+      allowedMentions: { parse: ['users'] }
     });
 
     console.log(`${EMOJIS.SUCCESS} Tarjeta de bienvenida enviada para ${member.user.tag}`);
@@ -243,8 +469,10 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     const userId = oldState.member.id;
     const trackingKey = `${userId}_${guildId}`;
 
-    // ========== SISTEMA DE HONOR PASIVO: VOZ ==========
+    // ========== SISTEMA DE HONOR PASIVO: VOZ ===========
     // Rastrear cuando usuarios se unen/salen de canales de voz
+    // Exclude bot users from passive rewards
+    if (oldState.member.user.bot) return;
 
     // Usuario se unió a un canal de voz
     if (!oldState.channelId && newState.channelId) {
@@ -273,7 +501,23 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
           try {
             const userData = dataManager.addHonor(userId, guildId, honorToGrant);
-            userData.koku = (userData.koku || 0) + kokuToGrant;
+            // Exclude bot user from earning koku
+            if (userData.userId !== client.user.id && !userData.isBot) {
+              userData.koku = (userData.koku || 0) + kokuToGrant;
+            }
+
+            // Notificar si hubo ascenso de rango por tiempo en voz
+            try {
+              const meta = userData.__lastHonorChange;
+              if (meta && meta.rankChanged) {
+                const usr = await client.users.fetch(userId).catch(() => null);
+                if (usr) {
+                  await usr.send(`${MESSAGES.HONOR.RANK_UP(meta.newRank)}\n${MESSAGES.SUCCESS.HONOR_GAINED(meta.amount)}`).catch(() => {});
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
 
             // Actualizar estadísticas de voz (usar tiempo TOTAL, no solo restante)
             if (userData.stats) {
@@ -321,6 +565,17 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
           // Actualizar honor total del clan si el usuario pertenece a uno
           if (userData.clanId) {
             dataManager.updateClanStats(userData.clanId);
+          }
+
+          // Notificar si hubo ascenso de rango por bono de voz
+          try {
+            const meta = userData.__lastHonorChange;
+            if (meta && meta.rankChanged) {
+              const usr = await client.users.fetch(userId).catch(() => null);
+              if (usr) await usr.send(`${MESSAGES.HONOR.RANK_UP(meta.newRank)}\n${MESSAGES.SUCCESS.HONOR_GAINED(meta.amount)}`).catch(() => {});
+            }
+          } catch (e) {
+            // ignore
           }
 
           // Marcar datos como modificados
@@ -505,9 +760,27 @@ client.on(Events.MessageCreate, async (message) => {
 
       // Verificar cooldown de honor por mensajes (1 minuto)
       if (!dataManager.hasCooldown(userId, 'honor_message')) {
-        // Ganar honor y koku por mensaje
+        // Ganar honor (koku only for real users, not the bot)
         const userData = dataManager.addHonor(userId, guildId, CONSTANTS.HONOR.PER_MESSAGE);
-        userData.koku = (userData.koku || 0) + CONSTANTS.ECONOMY.PER_MESSAGE;
+        if (userData.userId !== client.user.id && !userData.isBot) {
+          userData.koku = (userData.koku || 0) + CONSTANTS.ECONOMY.PER_MESSAGE;
+        }
+
+        // Notificaciones: si hubo cambio de rango, notificar al usuario
+        try {
+          const meta = userData.__lastHonorChange;
+          if (meta && meta.rankChanged) {
+            // Intentar enviar DM primero. No enviar notificación pública (privado sólo).
+            try {
+              const usr = await client.users.fetch(userId).catch(() => null);
+              if (usr) await usr.send(`${MESSAGES.HONOR.RANK_UP(meta.newRank)}\n${MESSAGES.SUCCESS.HONOR_GAINED(meta.amount)}`).catch(() => {});
+            } catch (e) {
+              // ignore DM failures silently - notifications are DM-only by design
+            }
+          }
+        } catch (e) {
+          // ignore notification errors
+        }
 
         // Incrementar contador de mensajes
         if (userData.stats) {
@@ -534,6 +807,102 @@ client.on(Events.MessageCreate, async (message) => {
     }
   }
   // ========== FIN SISTEMA DE HONOR PASIVO ==========
+
+  // ========== DETECCIÓN AUTOMÁTICA DE URLS DE MÚSICA ==========
+  // Si el mensaje contiene una URL de música en el canal de música, reproducirla automáticamente
+  if (message.guild && !message.author.bot && config.musicChannel?.enabled && config.musicChannel.channelId) {
+    if (message.channel.id === config.musicChannel.channelId) {
+      // Regex para detectar URLs de música (YouTube, Spotify, SoundCloud)
+      const musicUrlRegex = /(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|spotify\.com|soundcloud\.com|open\.spotify\.com)\/[^\s]+/gi;
+      const urls = message.content.match(musicUrlRegex);
+
+      if (urls && urls.length > 0) {
+        // Verificar que el usuario esté en un canal de voz
+        if (!message.member.voice.channel) {
+          return message.reply({
+            content: MESSAGES.MUSIC.NOT_IN_VOICE
+          }).catch(() => {});
+        }
+
+        try {
+          const musicManager = require('./utils/musicManager');
+          const ServerQueue = require('./utils/musicQueue');
+          const guildId = message.guild.id;
+
+          let queue = musicManager.getQueue(guildId);
+
+          // Crear cola si no existe
+          if (!queue) {
+            queue = new ServerQueue(
+              message.guild,
+              message.member.voice.channel,
+              message.channel
+            );
+            musicManager.setQueue(guildId, queue);
+          }
+
+          // Agregar cada URL encontrada
+          for (const url of urls) {
+            try {
+              // Buscar información de la canción
+              const songs = await musicManager.searchSongs(url.trim());
+
+              if (songs && songs.length > 0) {
+                const song = songs[0];
+
+                // Agregar a la cola
+                queue.addSong(song);
+
+                // Reaccionar con emoji de música
+                await message.react('🎵').catch(() => {});
+
+                // Si no hay nada reproduciéndose, empezar
+                if (!queue.nowPlaying) {
+                  await musicManager.playSong(queue);
+                } else {
+                  // Notificar que se agregó a la cola
+                  const position = queue.songs.length;
+                  await message.reply({
+                    content: MESSAGES.MUSIC.SONG_ADDED(song.title, position)
+                  }).catch(() => {});
+                }
+              }
+            } catch (error) {
+              console.error('Error procesando URL de música:', url, error.message);
+              // Silencioso para no interrumpir
+            }
+          }
+        } catch (error) {
+          console.error('Error en detección automática de música:', error);
+          // Fallar silenciosamente para no interrumpir el chat
+        }
+      } else {
+        // Si el mensaje está en el canal de música pero NO contiene URLs de música
+        // y NO es un comando, eliminarlo y enviar advertencia efímera
+        if (!message.content.startsWith('!') && !message.content.startsWith('/')) {
+          try {
+            // Eliminar el mensaje del usuario
+            await message.delete().catch(() => {});
+
+            // Enviar mensaje de advertencia temporal (se auto-elimina en 8 segundos)
+            await message.channel.send({
+              content: `${EMOJIS.WARNING} <@${message.author.id}>, el **Dojo del Sonido** está reservado para música.\n\n` +
+                       `${EMOJIS.SHAKUHACHI} **Puedes:**\n` +
+                       `▶️ Pegar enlaces de YouTube, Spotify o SoundCloud para reproducir música\n` +
+                       `▶️ Usar comandos de música (${EMOJIS.SEARCH} \`/play\`, \`/queue\`, \`/playlist\`, etc.)\n\n` +
+                       `${EMOJIS.MESSAGE} Para conversar, usa otros canales del servidor.`
+            }).then(msg => {
+              // Auto-eliminar el mensaje de advertencia después de 8 segundos
+              setTimeout(() => msg.delete().catch(() => {}), 8000);
+            }).catch(() => {});
+          } catch (error) {
+            console.error('Error eliminando mensaje en canal de música:', error.message);
+          }
+        }
+      }
+    }
+  }
+  // ========== FIN DETECCIÓN AUTOMÁTICA DE URLS DE MÚSICA ==========
 
   // ========== LECTURA AUTOMÁTICA DE MENSAJES EN VOZ ==========
   // Si el bot está conectado a voz y el usuario está en el mismo canal,
@@ -1536,7 +1905,7 @@ client.on(Events.MessageCreate, async (message) => {
 
       const statusMsg = await message.reply(`${EMOJIS.LOADING} Consultando el ranking de honor...`);
 
-      const guildUsers = dataManager.getGuildUsers(guildId);
+      const guildUsers = dataManager.getGuildUsers(guildId).filter(u => u.userId !== client.user.id);
 
       if (guildUsers.length === 0) {
         return statusMsg.edit(`${EMOJIS.INFO} Aún no hay guerreros registrados en el dojo. ¡Usa comandos para ganar honor!`);
@@ -1611,12 +1980,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   const { commandName } = interaction;
 
+  // Comandos de música que requieren estar en el canal de música
+  const musicCommands = ['tocar', 'play', 'pausar', 'pause', 'reanudar', 'resume', 'siguiente', 'skip', 'detener', 'stop', 'cola', 'queue', 'ahora', 'sonando', 'nowplaying', 'np', 'limpiar', 'clear', 'saltar', 'jump', 'remover', 'remove', 'volumen', 'volume', 'buscar', 'search', 'mezclar', 'shuffle', 'repetir', 'loop', 'playlist', 'ayudamusica', 'helpmusic'];
+  
+  // Verificar si el comando de música debe ejecutarse en el canal de música
+  if (musicCommands.includes(commandName)) {
+    if (config.musicChannel && config.musicChannel.enabled && config.musicChannel.channelId) {
+      if (interaction.channel.id !== config.musicChannel.channelId) {
+        const musicChannel = interaction.guild.channels.cache.get(config.musicChannel.channelId);
+        const channelName = musicChannel ? musicChannel.name : 'el canal de música';
+        const channelMention = musicChannel ? `<#${config.musicChannel.channelId}>` : 'el canal de música';
+        
+        return interaction.reply({
+          content: `❌ Los comandos de música solo pueden usarse en ${channelMention} (**${channelName}**).`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    }
+    // Si es un comando de música y pasó la verificación, salir aquí para evitar la verificación del canal de comandos
+    // (continuará con el switch más abajo)
+  }
+  
   // Comandos que NO requieren estar en el canal de comandos
-  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil'];
+  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic'];
   
   // Verificar si el comando debe ejecutarse en un canal específico
+  // (excluir comandos de música ya que tienen su propia verificación)
   if (config.commandsChannel && config.commandsChannel.enabled && config.commandsChannel.channelId) {
-    if (!excludedCommands.includes(commandName)) {
+    if (!excludedCommands.includes(commandName) && !musicCommands.includes(commandName)) {
       if (interaction.channel.id !== config.commandsChannel.channelId) {
         const commandsChannel = interaction.guild.channels.cache.get(config.commandsChannel.channelId);
         const channelName = commandsChannel ? commandsChannel.name : 'el canal de comandos';
@@ -1751,6 +2142,36 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.reply({ embeds: [embed1] });
       console.log(`${EMOJIS.SUCCESS} Comando de ayuda mostrado para ${interaction.user.tag} (slash)`);
+    }
+
+    // /purge now (admin-only, restricted to owner's ID)
+    else if (commandName === 'purge') {
+      const OWNER_ID = '331621993860300800';
+      if (interaction.user.id !== OWNER_ID) {
+        return interaction.reply({ content: '❌ No autorizado. Solo el propietario puede usar este comando.', flags: MessageFlags.Ephemeral });
+      }
+
+      // Ensure the purge runner is available
+      if (!client.runPurgeTask) {
+        return interaction.reply({ content: '❌ La tarea de purge no está disponible en este momento.', flags: MessageFlags.Ephemeral });
+      }
+
+      // Prevent concurrent runs
+      if (client.isPurgeRunningFlag && client.isPurgeRunningFlag()) {
+        return interaction.reply({ content: '⚠️ Ya hay una purga en curso. Intenta de nuevo más tarde.', flags: MessageFlags.Ephemeral });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        client.setPurgeRunning(true);
+        await client.runPurgeTask();
+        await interaction.editReply({ content: '✅ Purge ejecutada correctamente. Revisa los logs para detalles.' });
+      } catch (err) {
+        console.error('Error ejecutando purge desde comando:', err);
+        await interaction.editReply({ content: '❌ Ocurrió un error al ejecutar la purge. Revisa la consola.' });
+      } finally {
+        client.setPurgeRunning(false);
+      }
     }
 
     // /borrarmsg
@@ -2382,7 +2803,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.deferReply();
 
       // Obtener todos los usuarios del servidor
-      const guildUsers = dataManager.getGuildUsers(guildId);
+      const guildUsers = dataManager.getGuildUsers(guildId).filter(u => u.userId !== client.user.id);
 
       if (guildUsers.length === 0) {
         return interaction.editReply(`${EMOJIS.INFO} Aún no hay guerreros registrados en el dojo. ¡Usa comandos para ganar honor!`);
@@ -2757,8 +3178,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.deferReply();
 
-      // Obtener todos los usuarios del servidor
-      const guildUsers = dataManager.getGuildUsers(guildId);
+      // Obtener todos los usuarios del servidor (excluyendo el bot)
+      const guildUsers = dataManager.getGuildUsers(guildId).filter(u => u.userId !== client.user.id);
 
       if (guildUsers.length === 0) {
         return interaction.editReply(`${EMOJIS.INFO} Aún no hay guerreros registrados en el dojo. ¡Usa comandos para ganar honor!`);
@@ -4129,8 +4550,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
               const winnerData = dataManager.getUser(winner.id, guildId);
               const loserData = dataManager.getUser(loser.id, guildId);
 
-              dataManager.addHonor(winner.id, guildId, bet);
-              dataManager.addHonor(loser.id, guildId, -bet);
+              const winnerResult = dataManager.addHonor(winner.id, guildId, bet);
+              const loserResult = dataManager.addHonor(loser.id, guildId, -bet);
+
+              // Notify winner/loser of rank change if any
+              try {
+                const wmeta = winnerResult.__lastHonorChange;
+                if (wmeta && wmeta.rankChanged) {
+                  const wusr = await client.users.fetch(winner.id).catch(() => null);
+                  if (wusr) await wusr.send(`${MESSAGES.HONOR.RANK_UP(wmeta.newRank)}\n${MESSAGES.SUCCESS.HONOR_GAINED(wmeta.amount)}`).catch(() => {});
+                }
+              } catch (e) {}
+              try {
+                const lmeta = loserResult.__lastHonorChange;
+                if (lmeta && lmeta.rankChanged) {
+                  const lusr = await client.users.fetch(loser.id).catch(() => null);
+                  if (lusr) await lusr.send(`${MESSAGES.HONOR.RANK_DOWN(lmeta.newRank)}`).catch(() => {});
+                }
+              } catch (e) {}
 
               // Actualizar estadísticas de duelos
               winnerData.stats.duelsWon = (winnerData.stats.duelsWon || 0) + 1;
@@ -4390,9 +4827,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
       const displayName = targetMember?.displayName || targetUser.username;
 
+      // Obtener cosméticos activos
+      const activeCosmetics = dataManager.getActiveCosmetics(userId, guildId);
+      
+      // Construir información de cosméticos
+      let cosmeticsInfo = '';
+      let profileTitle = displayName;
+
+      if (activeCosmetics.titleId) {
+        const titleItem = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === activeCosmetics.titleId);
+        if (titleItem) {
+          profileTitle = `${titleItem.effect.title} ${displayName}`;
+          cosmeticsInfo += `${titleItem.name}\n`;
+        }
+      }
+
+      if (activeCosmetics.badgeId) {
+        const badgeItem = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === activeCosmetics.badgeId);
+        if (badgeItem) {
+          cosmeticsInfo += `${badgeItem.name}\n`;
+        }
+      }
+
       const embed = new EmbedBuilder()
         .setColor(COLORS.PRIMARY)
-        .setTitle(MESSAGES.PROFILE.TITLE(displayName))
+        .setTitle(MESSAGES.PROFILE.TITLE(profileTitle))
         .setThumbnail(targetUser.displayAvatarURL())
         .addFields(
           {
@@ -4409,7 +4868,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
             name: `${EMOJIS.STREAK} Racha Daily`,
             value: `**${userData.dailyStreak}** días`,
             inline: true
-          },
+          }
+        );
+
+      // Agregar cosméticos si hay activos
+      if (cosmeticsInfo.trim()) {
+        embed.addFields({
+          name: '🎨 Cosméticos',
+          value: cosmeticsInfo.trim(),
+          inline: false
+        });
+      }
+
+      embed.addFields(
           {
             name: MESSAGES.PROFILE.STATS_TITLE,
             value: `${EMOJIS.MESSAGE} Mensajes: **${userData.stats?.messagesCount || 0}**\n${EMOJIS.VOICE} Tiempo en voz: **${userData.stats?.voiceMinutes || 0}** min\n${EMOJIS.DUEL} Duelos: **${userData.stats?.duelsWon || 0}**W / **${userData.stats?.duelsLost || 0}**L (${userData.stats?.duelsTotal || 0} total)`,
@@ -4856,10 +5327,269 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   .setColor(COLORS.PRIMARY)
                   .setTitle('📦 Tu Inventario')
                   .setDescription(description || 'No tienes items.')
-                  .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                  .setFooter({ text: 'Click en los botones para activar cosméticos' })
                   .setTimestamp();
 
-                return i.reply({ embeds: [inventoryEmbed], flags: MessageFlags.Ephemeral });
+                // Crear botones para cosméticos
+                const cosmeticItems = Object.values(groupedItems)
+                  .map(({ item }) => item)
+                  .filter(item => item.category === 'cosmetics');
+
+                const rows = [];
+
+                // Agregar botones para cada cosmético (máximo 5 por row)
+                if (cosmeticItems.length > 0) {
+                  let currentRow = new ActionRowBuilder();
+                  let buttonCount = 0;
+
+                  for (const cosmetic of cosmeticItems) {
+                    const cleanName = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g, '').trim();
+                    
+                    // Determinar si está activo
+                    const activeCosmetics = dataManager.getActiveCosmetics(userId, guildId);
+                    let isActive = false;
+                    if (cosmetic.id.includes('title')) {
+                      isActive = activeCosmetics.titleId === cosmetic.id;
+                    } else if (cosmetic.id.includes('badge')) {
+                      isActive = activeCosmetics.badgeId === cosmetic.id;
+                    } else if (cosmetic.id.includes('color')) {
+                      isActive = activeCosmetics.colorId === cosmetic.id;
+                    }
+
+                    const button = new ButtonBuilder()
+                      .setCustomId(`activate_cosmetic_${cosmetic.id}`)
+                      .setLabel(`${isActive ? '✅' : ''} ${cleanName.substring(0, 18)}`.trim())
+                      .setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Primary);
+
+                    currentRow.addComponents(button);
+                    buttonCount++;
+
+                    if (buttonCount === 5) {
+                      rows.push(currentRow);
+                      currentRow = new ActionRowBuilder();
+                      buttonCount = 0;
+                    }
+                  }
+
+                  if (buttonCount > 0) {
+                    rows.push(currentRow);
+                  }
+                }
+
+                const components = rows.length > 0 ? rows : [];
+
+                // Agregar botón para volver
+                const backButton = new ButtonBuilder()
+                  .setCustomId('shop_back_from_inventory')
+                  .setLabel('Cerrar inventario')
+                  .setStyle(ButtonStyle.Secondary);
+
+                const backRow = new ActionRowBuilder().addComponents(backButton);
+                const finalComponents = components.length > 0 ? [...components, backRow] : [backRow];
+
+                return i.update({ embeds: [inventoryEmbed], components: finalComponents });
+              }
+
+              // Manejar activación/desactivación de cosméticos desde inventario
+              if (i.customId && i.customId.startsWith('activate_cosmetic_')) {
+                const cosmeticId = i.customId.replace('activate_cosmetic_', '');
+                const cosmeticItem = Object.values(CONSTANTS.SHOP.ITEMS).find(item => item.id === cosmeticId);
+                const currentUserData = dataManager.getUser(userId, guildId);
+
+                if (!cosmeticItem) {
+                  await safeDeferUpdate(i);
+                  return i.followUp({ content: '❌ Cosmético no encontrado.', flags: MessageFlags.Ephemeral });
+                }
+
+                // Determinar tipo de cosmético
+                let cosmeticType;
+                if (cosmeticId.includes('title')) {
+                  cosmeticType = 'title';
+                } else if (cosmeticId.includes('badge')) {
+                  cosmeticType = 'badge';
+                } else if (cosmeticId.includes('color')) {
+                  cosmeticType = 'color';
+                } else {
+                  await safeDeferUpdate(i);
+                  return i.followUp({ content: '❌ No se pudo determinar el tipo de cosmético.', flags: MessageFlags.Ephemeral });
+                }
+
+                // Obtener cosméticos activos
+                const activeCosmetics = dataManager.getActiveCosmetics(userId, guildId);
+                const typeMap = { 'title': 'titleId', 'badge': 'badgeId', 'color': 'colorId' };
+                const isCurrentlyActive = activeCosmetics[typeMap[cosmeticType]] === cosmeticId;
+
+                try {
+                  await safeDeferUpdate(i);
+
+                  if (isCurrentlyActive) {
+                    // DESACTIVAR
+                    if (cosmeticType === 'color') {
+                      try {
+                        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+                        if (member) {
+                          const cosmeticRole = member.roles.cache.find(role => role.name.startsWith('🎨'));
+                          if (cosmeticRole) {
+                            await member.roles.remove(cosmeticRole).catch(() => {});
+                            const rolesWithMember = cosmeticRole.members;
+                            if (rolesWithMember.size === 0) {
+                              await cosmeticRole.delete().catch(() => {});
+                            }
+                          }
+                        }
+                      } catch (roleError) {
+                        console.error('Error eliminando rol:', roleError);
+                      }
+                    }
+
+                    // Desactivar en DB
+                    dataManager.setActiveCosmetic(userId, guildId, cosmeticType, null);
+                    await dataManager.saveUsers();
+
+                    await i.followUp({ content: `✅ ${cosmeticItem.name} **desactivado**.`, flags: MessageFlags.Ephemeral });
+                    console.log(`🎨 ${interaction.user.tag} desactivó cosmético: ${cosmeticItem.name}`);
+                  } else {
+                    // ACTIVAR
+                    dataManager.setActiveCosmetic(userId, guildId, cosmeticType, cosmeticId);
+
+                    // Si el item NO es permanente (es consumible), eliminarlo del inventario
+                    if (cosmeticItem.type !== 'permanent') {
+                      const inventoryIndex = currentUserData.inventory.findIndex(inv => inv.itemId === cosmeticId);
+                      if (inventoryIndex !== -1) {
+                        if ((currentUserData.inventory[inventoryIndex].quantity || 1) > 1) {
+                          currentUserData.inventory[inventoryIndex].quantity = (currentUserData.inventory[inventoryIndex].quantity || 1) - 1;
+                        } else {
+                          currentUserData.inventory.splice(inventoryIndex, 1);
+                        }
+                      }
+                    }
+
+                    await dataManager.saveUsers();
+
+                    // Si es un cosmético de color, crear/modificar el rol
+                    if (cosmeticType === 'color') {
+                      const colorValue = cosmeticItem.effect.roleColor;
+                      const roleName = `🎨 ${cosmeticItem.name.replace(/🥉🥈🥇/g, '').trim()}`;
+
+                      try {
+                        const member = await interaction.guild.members.fetch(userId).catch(() => null);
+                        if (!member) {
+                          return i.followUp({ content: '❌ No se pudo encontrar tu usuario en el servidor.', flags: MessageFlags.Ephemeral });
+                        }
+
+                        let cosmeticRole = member.roles.cache.find(role => role.name.startsWith('🎨'));
+                        if (cosmeticRole) {
+                          await member.roles.remove(cosmeticRole).catch(() => {});
+                          const rolesWithMember = cosmeticRole.members;
+                          if (rolesWithMember.size === 0) {
+                            await cosmeticRole.delete().catch(() => {});
+                          }
+                        }
+
+                        cosmeticRole = await interaction.guild.roles.create({
+                          name: roleName,
+                          color: colorValue,
+                          reason: `Cosmético activado: ${cosmeticItem.name}`
+                        });
+
+                        await member.roles.add(cosmeticRole).catch(() => {});
+                        await i.followUp({ content: `✅ ¡${cosmeticItem.name} **activado**! Se te ha asignado el rol con color personalizado.`, flags: MessageFlags.Ephemeral });
+                      } catch (roleError) {
+                        console.error('Error creando/modificando rol:', roleError);
+                        await i.followUp({ content: `✅ ¡${cosmeticItem.name} **activado**! Nota: No se pudo crear el rol automáticamente.`, flags: MessageFlags.Ephemeral });
+                      }
+                    } else {
+                      await i.followUp({ content: `✅ ¡${cosmeticItem.name} **activado**! Tu cambio será visible en tu perfil.`, flags: MessageFlags.Ephemeral });
+
+                      console.log(`🎨 ${interaction.user.tag} activó cosmético desde inventario: ${cosmeticItem.name}`);
+                    }
+                  }
+                
+                // Después de activar/desactivrar, reconstruir la vista del inventario y actualizar el mensaje
+                try {
+                  const refreshedUser = dataManager.getUser(userId, guildId);
+                  let description = '';
+                  const activeBoostsRef = refreshedUser.activeBoosts || [];
+                  if (activeBoostsRef.length > 0) {
+                    description += '**⚡ BOOSTS ACTIVOS:**\n';
+                    for (const boost of activeBoostsRef) {
+                      const item = Object.values(CONSTANTS.SHOP.ITEMS).find(it => it.id === boost.itemId);
+                      if (item) {
+                        const timeLeft = Math.max(0, boost.expiresAt - Date.now());
+                        const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
+                        const minutesLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+                        description += `${item.name} - ${hoursLeft}h ${minutesLeft}m restantes\n`;
+                      }
+                    }
+                    description += '\n';
+                  }
+
+                  description += '**📦 ITEMS EN INVENTARIO:**\n';
+                  const groupedItemsRef = {};
+                  for (const invItem of (refreshedUser.inventory || [])) {
+                    const item = Object.values(CONSTANTS.SHOP.ITEMS).find(it => it.id === invItem.itemId);
+                    if (item) {
+                      if (!groupedItemsRef[item.id]) groupedItemsRef[item.id] = { item, quantity: 0 };
+                      groupedItemsRef[item.id].quantity += (invItem.quantity || 1);
+                    }
+                  }
+
+                  for (const { item, quantity } of Object.values(groupedItemsRef)) {
+                    description += `${item.name}${quantity > 1 ? ` x${quantity}` : ''}\n`;
+                  }
+
+                  const inventoryEmbed = new EmbedBuilder()
+                    .setColor(COLORS.PRIMARY)
+                    .setTitle('📦 Tu Inventario')
+                    .setDescription(description || 'No tienes items.')
+                    .setFooter({ text: 'Click en los botones para activar cosméticos' })
+                    .setTimestamp();
+
+                  const cosmeticItemsRef = Object.values(groupedItemsRef).map(({ item }) => item).filter(item => item.category === 'cosmetics');
+                  const rowsRef = [];
+                  if (cosmeticItemsRef.length > 0) {
+                    let currentRowRef = new ActionRowBuilder();
+                    let buttonCountRef = 0;
+                    const activeCosmeticsRef = dataManager.getActiveCosmetics(userId, guildId);
+
+                    for (const cosmetic of cosmeticItemsRef) {
+                      const cleanName = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g, '').trim();
+                      let isActiveRef = false;
+                      if (cosmetic.id.includes('title')) isActiveRef = activeCosmeticsRef.titleId === cosmetic.id;
+                      else if (cosmetic.id.includes('badge')) isActiveRef = activeCosmeticsRef.badgeId === cosmetic.id;
+                      else if (cosmetic.id.includes('color')) isActiveRef = activeCosmeticsRef.colorId === cosmetic.id;
+
+                      const btn = new ButtonBuilder()
+                        .setCustomId(`activate_cosmetic_${cosmetic.id}`)
+                        .setLabel(`${isActiveRef ? '✅' : ''} ${cleanName.substring(0, 18)}`.trim())
+                        .setStyle(isActiveRef ? ButtonStyle.Success : ButtonStyle.Primary);
+
+                      currentRowRef.addComponents(btn);
+                      buttonCountRef++;
+                      if (buttonCountRef === 5) { rowsRef.push(currentRowRef); currentRowRef = new ActionRowBuilder(); buttonCountRef = 0; }
+                    }
+                    if (buttonCountRef > 0) rowsRef.push(currentRowRef);
+                  }
+
+                  const backBtn = new ButtonBuilder().setCustomId('shop_back_from_inventory').setLabel('Cerrar inventario').setStyle(ButtonStyle.Secondary).setEmoji('⬅️');
+                  const backRowRef = new ActionRowBuilder().addComponents(backBtn);
+                  const finalComponentsRef = rowsRef.length > 0 ? [...rowsRef, backRowRef] : [backRowRef];
+
+                  await message.edit({ embeds: [inventoryEmbed], components: finalComponentsRef }).catch(() => {});
+                  // Stop processing this interaction further (we already handled it)
+                  return;
+                } catch (rebuildError) {
+                  console.error('Error reconstruyendo inventario tras activación:', rebuildError);
+                }
+
+                } catch (error) {
+                  console.error('Error activando/desactivando cosmético:', error);
+                  if (i.deferred) {
+                    await i.followUp({ content: `❌ Error: ${error.message}`, flags: MessageFlags.Ephemeral });
+                  } else {
+                    await i.reply({ content: `❌ Error: ${error.message}`, flags: MessageFlags.Ephemeral });
+                  }
+                }
               }
 
               // Cambiar categoría
@@ -5081,13 +5811,446 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
           .setTimestamp();
 
-        await interaction.editReply({ embeds: [embed] });
+        // Construir botones para la vista directa de /tienda inventario (igual que en la vista interactiva)
+        const cosmeticItems = Object.values(groupedItems).map(({ item }) => item).filter(item => item.category === 'cosmetics');
+
+        const rows = [];
+        if (cosmeticItems.length > 0) {
+          let currentRow = new ActionRowBuilder();
+          let buttonCount = 0;
+          for (const cosmetic of cosmeticItems) {
+            const cleanName = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g, '').trim();
+            const activeCosmetics = dataManager.getActiveCosmetics(interaction.user.id, interaction.guild.id);
+            let isActive = false;
+            if (cosmetic.id.includes('title')) isActive = activeCosmetics.titleId === cosmetic.id;
+            else if (cosmetic.id.includes('badge')) isActive = activeCosmetics.badgeId === cosmetic.id;
+            else if (cosmetic.id.includes('color')) isActive = activeCosmetics.colorId === cosmetic.id;
+
+            const button = new ButtonBuilder()
+              .setCustomId(`activate_cosmetic_${cosmetic.id}`)
+              .setLabel(`${isActive ? '✅' : ''} ${cleanName.substring(0, 18)}`.trim())
+              .setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Primary);
+
+            currentRow.addComponents(button);
+            buttonCount++;
+            if (buttonCount === 5) { rows.push(currentRow); currentRow = new ActionRowBuilder(); buttonCount = 0; }
+          }
+          if (buttonCount > 0) rows.push(currentRow);
+        }
+
+        const backButton = new ButtonBuilder().setCustomId('shop_back_from_inventory').setLabel('Cerrar inventario').setStyle(ButtonStyle.Secondary);
+        const backRow = new ActionRowBuilder().addComponents(backButton);
+        const finalComponents = rows.length > 0 ? [...rows, backRow] : [backRow];
+
+        await interaction.editReply({ embeds: [embed], components: finalComponents });
+        const shopMessage = await interaction.fetchReply();
+
+        // Collector para manejar los botones en la vista de /tienda inventario
+        const invCollector = shopMessage.createMessageComponentCollector({ filter: (btnInt) => btnInt.user.id === interaction.user.id, time: 300000 });
+
+        invCollector.on('collect', async (bi) => {
+          try {
+            if (bi.customId === 'shop_back_from_inventory') {
+              // Actualizar la respuesta efímera para cerrar el inventario (no intentar borrar ephemeral)
+              await bi.update({ content: '✅ Inventario cerrado.', embeds: [], components: [] }).catch(() => {});
+              return invCollector.stop('closed');
+            }
+
+            if (bi.customId && bi.customId.startsWith('activate_cosmetic_')) {
+              // Reusar la lógica de activación/desactivación (similar a la vista interactiva)
+              const cosmeticId = bi.customId.replace('activate_cosmetic_', '');
+              const cosmeticItem = Object.values(CONSTANTS.SHOP.ITEMS).find(item => item.id === cosmeticId);
+              const userId = bi.user.id;
+              const guildId = bi.guildId || interaction.guild.id;
+              const currentUserData = dataManager.getUser(userId, guildId);
+
+              if (!cosmeticItem) {
+                await safeDeferUpdate(bi);
+                await bi.followUp({ content: '❌ Cosmético no encontrado.', flags: MessageFlags.Ephemeral });
+                return;
+              }
+
+              // Determinar tipo
+              let cosmeticType;
+              if (cosmeticId.includes('title')) cosmeticType = 'title';
+              else if (cosmeticId.includes('badge')) cosmeticType = 'badge';
+              else if (cosmeticId.includes('color')) cosmeticType = 'color';
+              else {
+                await safeDeferUpdate(bi);
+                await bi.followUp({ content: '❌ No se pudo determinar el tipo de cosmético.', flags: MessageFlags.Ephemeral });
+                return;
+              }
+
+              const activeCosmetics = dataManager.getActiveCosmetics(userId, guildId);
+              const typeMap = { 'title': 'titleId', 'badge': 'badgeId', 'color': 'colorId' };
+              const isCurrentlyActive = activeCosmetics[typeMap[cosmeticType]] === cosmeticId;
+
+              await safeDeferUpdate(bi);
+
+              if (isCurrentlyActive) {
+                // Desactivar
+                if (cosmeticType === 'color') {
+                  try {
+                    const member = await bi.guild.members.fetch(userId).catch(() => null);
+                    if (member) {
+                      const cosmeticRole = member.roles.cache.find(r => r.name.startsWith('🎨'));
+                      if (cosmeticRole) {
+                        await member.roles.remove(cosmeticRole).catch(() => {});
+                        const rolesWithMember = cosmeticRole.members;
+                        if (rolesWithMember.size === 0) await cosmeticRole.delete().catch(() => {});
+                      }
+                    }
+                  } catch (err) { console.error('Error eliminando rol:', err); }
+                }
+
+                dataManager.setActiveCosmetic(userId, guildId, cosmeticType, null);
+                await dataManager.saveUsers();
+                await bi.followUp({ content: `✅ ${cosmeticItem.name} **desactivado**.`, flags: MessageFlags.Ephemeral });
+              } else {
+                // Activar
+                dataManager.setActiveCosmetic(userId, guildId, cosmeticType, cosmeticId);
+                if (cosmeticItem.type !== 'permanent') {
+                  const inventoryIndex = currentUserData.inventory.findIndex(inv => inv.itemId === cosmeticId);
+                  if (inventoryIndex !== -1) {
+                    if ((currentUserData.inventory[inventoryIndex].quantity || 1) > 1) currentUserData.inventory[inventoryIndex].quantity--;
+                    else currentUserData.inventory.splice(inventoryIndex, 1);
+                  }
+                }
+                await dataManager.saveUsers();
+
+                if (cosmeticType === 'color') {
+                  try {
+                    const member = await bi.guild.members.fetch(userId).catch(() => null);
+                    if (!member) { await bi.followUp({ content: '❌ No se pudo encontrar tu usuario en el servidor.', flags: MessageFlags.Ephemeral }); return; }
+                    let cosmeticRole = member.roles.cache.find(r => r.name.startsWith('🎨'));
+                    if (cosmeticRole) { await member.roles.remove(cosmeticRole).catch(() => {}); const rolesWithMember = cosmeticRole.members; if (rolesWithMember.size === 0) await cosmeticRole.delete().catch(() => {}); }
+                    cosmeticRole = await bi.guild.roles.create({ name: `🎨 ${cosmeticItem.name.replace(/🥉🥈🥇/g, '').trim()}`, color: cosmeticItem.effect.roleColor, reason: `Cosmético activado: ${cosmeticItem.name}` });
+                    await member.roles.add(cosmeticRole).catch(() => {});
+                    await bi.followUp({ content: `✅ ¡${cosmeticItem.name} **activado**! Se te ha asignado el rol con color personalizado.`, flags: MessageFlags.Ephemeral });
+                  } catch (err) { console.error('Error creando/modificando rol:', err); await bi.followUp({ content: `✅ ¡${cosmeticItem.name} **activado**! Nota: No se pudo crear el rol automáticamente.`, flags: MessageFlags.Ephemeral }); }
+                } else {
+                  await bi.followUp({ content: `✅ ¡${cosmeticItem.name} **activado**! Tu cambio será visible en tu perfil.`, flags: MessageFlags.Ephemeral });
+                }
+              }
+
+              // Reconstruir embed/components y editar el mensaje
+              try {
+                const refreshedUser = dataManager.getUser(userId, guildId);
+                let desc = '';
+                const boostsRef = refreshedUser.activeBoosts || [];
+                if (boostsRef.length > 0) {
+                  desc += '**⚡ BOOSTS ACTIVOS:**\n';
+                  for (const boost of boostsRef) {
+                    const item = Object.values(CONSTANTS.SHOP.ITEMS).find(it => it.id === boost.itemId);
+                    if (item) { const timeLeft = Math.max(0, boost.expiresAt - Date.now()); const hoursLeft = Math.floor(timeLeft/(60*60*1000)); const minutesLeft = Math.floor((timeLeft%(60*60*1000))/(60*1000)); desc += `${item.name} - ${hoursLeft}h ${minutesLeft}m restantes\n`; }
+                  }
+                  desc += '\n';
+                }
+                desc += '**📦 ITEMS EN INVENTARIO:**\n';
+                const groupedRef = {};
+                for (const invItem of (refreshedUser.inventory || [])) { const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === invItem.itemId); if (item) { if (!groupedRef[item.id]) groupedRef[item.id] = { item, quantity: 0 }; groupedRef[item.id].quantity += (invItem.quantity || 1); } }
+                for (const { item, quantity } of Object.values(groupedRef)) desc += `${item.name}${quantity>1?` x${quantity}`:''}\n`;
+                const newEmbed = new EmbedBuilder().setColor(COLORS.PRIMARY).setTitle('📦 Tu Inventario').setDescription(desc||'No tienes items.').setFooter({ text: MESSAGES.FOOTER.DEFAULT }).setTimestamp();
+
+                // rebuild component rows
+                const cosmeticsRef = Object.values(groupedRef).map(({ item }) => item).filter(item => item.category === 'cosmetics');
+                const rowsNew = [];
+                if (cosmeticsRef.length > 0) {
+                  let cr = new ActionRowBuilder(); let bc=0; const activeRef = dataManager.getActiveCosmetics(userId, guildId);
+                  for (const cosmetic of cosmeticsRef) { const clean = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g,'').trim(); let isA=false; if (cosmetic.id.includes('title')) isA = activeRef.titleId===cosmetic.id; else if (cosmetic.id.includes('badge')) isA = activeRef.badgeId===cosmetic.id; else if (cosmetic.id.includes('color')) isA = activeRef.colorId===cosmetic.id; const b = new ButtonBuilder().setCustomId(`activate_cosmetic_${cosmetic.id}`).setLabel(`${isA?'✅':''} ${clean.substring(0,18)}`.trim()).setStyle(isA?ButtonStyle.Success:ButtonStyle.Primary); cr.addComponents(b); bc++; if (bc===5) { rowsNew.push(cr); cr=new ActionRowBuilder(); bc=0; } }
+                  if (bc>0) rowsNew.push(cr);
+                }
+                const backR = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('shop_back_from_inventory').setLabel('Cerrar inventario').setStyle(ButtonStyle.Secondary));
+                const finalNew = rowsNew.length>0? [...rowsNew, backR] : [backR];
+                await shopMessage.edit({ embeds: [newEmbed], components: finalNew }).catch(()=>{});
+              } catch (e) { console.error('Error rebuilding inventory (invCollector):', e); }
+            }
+          } catch (err) {
+            console.error('Error en invCollector:', err);
+          }
+        });
+
         console.log(`🏪 ${interaction.user.tag} consultó su inventario`);
       }
     }
 
-    // ==================== SISTEMA DE MÚSICA (DOJO DEL SONIDO) ====================
+    // ==================== SISTEMA DE COSMÉTICOS ====================
 
+    else if (commandName === 'cosmetics') {
+      const subcommand = interaction.options.getSubcommand();
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+      const userData = dataManager.getUser(userId, guildId);
+
+      // /cosmetics ver - Ver todos los cosméticos
+      if (subcommand === 'ver') {
+        const cosmetics = userData.inventory.filter(inv => {
+          const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === inv.itemId);
+          return item && item.category === 'cosmetics';
+        });
+
+        if (cosmetics.length === 0) {
+          return interaction.reply({
+            content: '❌ No tienes cosméticos en tu inventario. Compra algunos en `/tienda`.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const activeCosmetics = dataManager.getActiveCosmetics(userId, guildId);
+        
+        let description = '**🎨 TUS COSMÉTICOS:**\n\n';
+
+        // Agrupar por tipo
+        const titles = [];
+        const badges = [];
+        const colors = [];
+
+        for (const invItem of cosmetics) {
+          const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === invItem.itemId);
+          if (!item) continue;
+
+          const isActive = (
+            (item.id.includes('title') && activeCosmetics.titleId === item.id) ||
+            (item.id.includes('badge') && activeCosmetics.badgeId === item.id) ||
+            (item.id.includes('color') && activeCosmetics.colorId === item.id)
+          );
+
+          const indicator = isActive ? ' ✅' : '';
+
+          if (item.id.includes('title')) {
+            titles.push(`${item.name}${indicator}`);
+          } else if (item.id.includes('badge')) {
+            badges.push(`${item.name}${indicator}`);
+          } else if (item.id.includes('color')) {
+            colors.push(`${item.name}${indicator}`);
+          }
+        }
+
+        if (titles.length > 0) {
+          description += '**👑 Títulos:**\n' + titles.join('\n') + '\n\n';
+        }
+        if (badges.length > 0) {
+          description += '**🏅 Badges:**\n' + badges.join('\n') + '\n\n';
+        }
+        if (colors.length > 0) {
+          description += '**🎨 Colores de Rol:**\n' + colors.join('\n') + '\n\n';
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle('🎨 Tus Cosméticos')
+          .setDescription(description)
+          .setFooter({ text: 'Usa /cosmetics usar para activar un cosmético' })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        console.log(`🎨 ${interaction.user.tag} consultó sus cosméticos`);
+      }
+
+      // /cosmetics usar - Activar cosmético
+      else if (subcommand === 'usar') {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        const cosmeticType = interaction.options.getString('tipo');
+        const userId = interaction.user.id;
+        const guildId = interaction.guild.id;
+        const userData = dataManager.getUser(userId, guildId);
+
+        // Filtrar cosméticos disponibles por tipo
+        const availableCosmetics = userData.inventory
+          .map(inv => {
+            const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === inv.itemId);
+            return item;
+          })
+          .filter(item => {
+            if (!item) return false;
+            if (cosmeticType === 'title') return item.id.includes('title');
+            if (cosmeticType === 'badge') return item.id.includes('badge');
+            if (cosmeticType === 'color') return item.id.includes('color');
+            return false;
+          });
+
+        if (availableCosmetics.length === 0) {
+          return interaction.editReply(`❌ No tienes cosméticos de tipo **${cosmeticType}** en tu inventario.`);
+        }
+
+        // Crear menú de selección
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId('cosmetic_select')
+          .setPlaceholder('Selecciona un cosmético...')
+          .setMinValues(1)
+          .setMaxValues(1);
+
+        for (const cosmetic of availableCosmetics) {
+          const cleanName = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g, '').trim();
+          selectMenu.addOptions(
+            new StringSelectMenuOptionBuilder()
+              .setLabel(cleanName)
+              .setValue(cosmetic.id)
+              .setDescription(cosmetic.description)
+          );
+        }
+
+        const row = new ActionRowBuilder().addComponents(selectMenu);
+
+        const typeEmoji = {
+          'title': '👑',
+          'badge': '🏅',
+          'color': '🎨'
+        };
+
+        const typeLabel = {
+          'title': 'Títulos',
+          'badge': 'Badges',
+          'color': 'Colores de Rol'
+        };
+
+        const selectMessage = await interaction.editReply({
+          content: `Selecciona un **${typeLabel[cosmeticType]}** ${typeEmoji[cosmeticType]} para activar:`,
+          components: [row],
+          flags: MessageFlags.Ephemeral
+        });
+
+        // Collector para la selección
+        const collector = selectMessage.createMessageComponentCollector({
+          filter: (i) => i.user.id === userId,
+          time: 60000 // 1 minuto
+        });
+
+        collector.on('collect', async (i) => {
+          if (i.customId === 'cosmetic_select') {
+            const selectedId = i.values[0];
+            const selectedCosmetic = Object.values(CONSTANTS.SHOP.ITEMS).find(item => item.id === selectedId);
+
+            try {
+              dataManager.setActiveCosmetic(userId, guildId, cosmeticType, selectedId);
+              await dataManager.saveUsers();
+
+              // Si es un cosmético de color, crear/modificar el rol
+              if (cosmeticType === 'color') {
+                const colorValue = selectedCosmetic.effect.roleColor;
+                const roleName = `🎨 ${selectedCosmetic.name.replace(/🥉🥈🥇/g, '').trim()}`;
+
+                try {
+                  // Obtener miembro
+                  const member = await interaction.guild.members.fetch(userId).catch(() => null);
+                  if (!member) {
+                    return i.reply({
+                      content: '❌ No se pudo encontrar tu usuario en el servidor.',
+                      flags: MessageFlags.Ephemeral
+                    });
+                  }
+
+                  // Buscar rol existente del usuario
+                  let cosmeticRole = member.roles.cache.find(role => role.name.startsWith('🎨'));
+
+                  // Si existe un rol anterior, eliminarlo
+                  if (cosmeticRole) {
+                    await member.roles.remove(cosmeticRole);
+                    // Solo eliminar si no tiene otros miembros
+                    const rolesWithMember = await cosmeticRole.members;
+                    if (rolesWithMember.size === 0) {
+                      await cosmeticRole.delete().catch(() => {});
+                    }
+                  }
+
+                  // Crear nuevo rol con el color
+                  cosmeticRole = await interaction.guild.roles.create({
+                    name: roleName,
+                    color: colorValue,
+                    reason: `Cosmético activado: ${selectedCosmetic.name}`
+                  });
+
+                  // Asignar rol al usuario
+                  await member.roles.add(cosmeticRole);
+
+                  await i.reply({
+                    content: `✅ ¡Cosmético activado! Se te ha asignado el rol **${roleName}** con color personalizado.`,
+                    flags: MessageFlags.Ephemeral
+                  });
+                } catch (roleError) {
+                  console.error('Error creando/modificando rol:', roleError);
+                  await i.reply({
+                    content: `✅ ¡Cosmético activado! Nota: No se pudo crear el rol automáticamente debido a permisos.`,
+                    flags: MessageFlags.Ephemeral
+                  });
+                }
+              } else {
+                await i.reply({
+                  content: `✅ ¡${selectedCosmetic.name} activado! Tu cambio será visible en tu perfil.\n\nUsa \`/perfil\` para verlo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              }
+
+              console.log(`🎨 ${interaction.user.tag} activó cosmético: ${selectedCosmetic.name}`);
+            } catch (error) {
+              console.error('Error activando cosmético:', error);
+              await i.reply({
+                content: `❌ Error al activar el cosmético: ${error.message}`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          }
+        });
+
+        collector.on('end', () => {
+          selectMenu.setDisabled(true);
+          selectMessage.edit({ components: [row] }).catch(() => {});
+        });
+      }
+
+      // /cosmetics deseleccionar - Desactivar cosmético
+      else if (subcommand === 'deseleccionar') {
+        const cosmeticType = interaction.options.getString('tipo');
+        const userId = interaction.user.id;
+        const guildId = interaction.guild.id;
+        const userData = dataManager.getUser(userId, guildId);
+
+        try {
+          // Si es color, eliminar el rol
+          if (cosmeticType === 'color') {
+            const member = await interaction.guild.members.fetch(userId).catch(() => null);
+            if (member) {
+              const cosmeticRole = member.roles.cache.find(role => role.name.startsWith('🎨'));
+              if (cosmeticRole) {
+                await member.roles.remove(cosmeticRole);
+                // Eliminar rol si no tiene otros miembros
+                const rolesWithMember = await cosmeticRole.members;
+                if (rolesWithMember.size === 0) {
+                  await cosmeticRole.delete().catch(() => {});
+                }
+              }
+            }
+          }
+
+          // Desactivar el cosmético
+          dataManager.setActiveCosmetic(userId, guildId, cosmeticType, null);
+          await dataManager.saveUsers();
+
+          const typeLabel = {
+            'title': 'Título',
+            'badge': 'Badge',
+            'color': 'Color de Rol'
+          };
+
+          await interaction.reply({
+            content: `✅ ${typeLabel[cosmeticType]} desactivado.`,
+            flags: MessageFlags.Ephemeral
+          });
+
+          console.log(`🎨 ${interaction.user.tag} desactivó cosmético de tipo: ${cosmeticType}`);
+        } catch (error) {
+          console.error('Error desactivando cosmético:', error);
+          await interaction.reply({
+            content: `❌ Error al desactivar el cosmético: ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+    }
+
+    // ==================== SISTEMA DE MÚSICA (DOJO DEL SONIDO) ====================
+    
     // Reproducción básica
     else if (commandName === 'tocar' || commandName === 'play') {
       await musicHandlers.handlePlay(interaction);
@@ -5134,6 +6297,517 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await musicHandlers.handleLoop(interaction);
     }
 
+    // ==================== PLAYLISTS ====================
+    else if (commandName === 'playlist') {
+      const subcommand = interaction.options.getSubcommand();
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+      const userData = dataManager.getUser(userId, guildId);
+
+      if (!userData.playlists) {
+        userData.playlists = [];
+      }
+
+      // CREAR: Crea una playlist vacía
+      if (subcommand === 'crear') {
+        const nombre = interaction.options.getString('nombre');
+
+        // Validar nombre
+        if (nombre.length < 2 || nombre.length > 50) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NAME_TOO_SHORT,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar si ya existe
+        const existingPlaylist = userData.playlists.find(p => p.name.toLowerCase() === nombre.toLowerCase());
+        if (existingPlaylist) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.ALREADY_EXISTS(nombre),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar límite
+        const MAX_PLAYLISTS = CONSTANTS.MUSIC?.MAX_PLAYLISTS_PER_USER || 20;
+        if (userData.playlists.length >= MAX_PLAYLISTS) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.LIMIT_REACHED(MAX_PLAYLISTS),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Crear playlist
+        const newPlaylist = {
+          name: nombre,
+          songs: [],
+          createdAt: Date.now(),
+          playCount: 0
+        };
+
+        userData.playlists.push(newPlaylist);
+        dataManager.updateUser(userId, guildId, { playlists: userData.playlists });
+
+        return interaction.reply({
+          content: MESSAGES.PLAYLISTS.CREATED(nombre),
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // GUARDAR: Guarda la cola actual como playlist
+      else if (subcommand === 'guardar') {
+        const nombre = interaction.options.getString('nombre');
+        const musicManager = require('./utils/musicManager');
+        const queue = musicManager.getQueue(guildId);
+
+        if (!queue || (queue.songs.length === 0 && !queue.nowPlaying)) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.QUEUE_EMPTY,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Validar nombre
+        if (nombre.length < 2 || nombre.length > 50) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NAME_TOO_SHORT,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar si ya existe
+        const existingPlaylist = userData.playlists.find(p => p.name.toLowerCase() === nombre.toLowerCase());
+        if (existingPlaylist) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.ALREADY_EXISTS(nombre),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar límite
+        const MAX_PLAYLISTS = CONSTANTS.MUSIC?.MAX_PLAYLISTS_PER_USER || 20;
+        if (userData.playlists.length >= MAX_PLAYLISTS) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.LIMIT_REACHED(MAX_PLAYLISTS),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Obtener todas las canciones
+        const allSongs = [];
+        if (queue.nowPlaying) {
+          allSongs.push(queue.nowPlaying);
+        }
+        allSongs.push(...queue.songs);
+
+        // Crear playlist
+        const newPlaylist = {
+          name: nombre,
+          songs: allSongs.map(song => ({
+            title: song.title,
+            url: song.url,
+            duration: song.duration,
+            thumbnail: song.thumbnail,
+            channel: song.channel
+          })),
+          createdAt: Date.now(),
+          playCount: 0
+        };
+
+        userData.playlists.push(newPlaylist);
+        dataManager.updateUser(userId, guildId, { playlists: userData.playlists });
+
+        return interaction.reply({
+          content: MESSAGES.PLAYLISTS.SAVED(nombre, allSongs.length),
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // CARGAR: Carga una playlist a la cola
+      else if (subcommand === 'cargar') {
+        const nombre = interaction.options.getString('nombre');
+        const playlist = userData.playlists.find(p => p.name.toLowerCase() === nombre.toLowerCase());
+
+        if (!playlist) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NOT_FOUND(nombre),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        if (playlist.songs.length === 0) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.EMPTY(nombre),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar que el usuario esté en un canal de voz
+        if (!interaction.member.voice.channel) {
+          return interaction.reply({
+            content: MESSAGES.MUSIC.NOT_IN_VOICE,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        await interaction.deferReply();
+
+        const musicManager = require('./utils/musicManager');
+        let queue = musicManager.getQueue(guildId);
+
+        // Crear cola si no existe
+        if (!queue) {
+          const ServerQueue = require('./utils/musicQueue');
+          queue = new ServerQueue(
+            interaction.guild,
+            interaction.member.voice.channel,
+            interaction.channel
+          );
+          musicManager.setQueue(guildId, queue);
+        }
+
+        // Agregar todas las canciones a la cola
+        let addedCount = 0;
+        for (const song of playlist.songs) {
+          if (queue.songs.length < (CONSTANTS.MUSIC?.MAX_QUEUE_SIZE || 100)) {
+            queue.addSong(song);
+            addedCount++;
+          }
+        }
+
+        // Incrementar contador de reproducción
+        playlist.playCount++;
+        dataManager.updateUser(userId, guildId, { playlists: userData.playlists });
+
+        // Si no hay nada reproduciéndose, empezar
+        if (!queue.nowPlaying) {
+          await musicManager.playSong(queue);
+        }
+
+        return interaction.editReply({
+          content: MESSAGES.PLAYLISTS.LOADED(nombre, addedCount)
+        });
+      }
+
+      // LISTAR: Muestra todas las playlists con botones para reproducir
+      else if (subcommand === 'listar') {
+        if (userData.playlists.length === 0) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NO_PLAYLISTS,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle(`${EMOJIS.SHAKUHACHI} Tus Playlists del Dojo`)
+          .setDescription(
+            userData.playlists.map((p, i) =>
+              `**${i + 1}.** 📚 **${p.name}**\n` +
+              `   └ 🎵 ${p.songs.length} cancion${p.songs.length !== 1 ? 'es' : ''} • ▶️ ${p.playCount} reproducciones`
+            ).join('\n\n') +
+            '\n\n💡 **Haz clic en un botón para cargar una playlist**'
+          )
+          .setFooter({ text: MESSAGES.MUSIC.FOOTER })
+          .setTimestamp();
+
+        // Crear botones para cada playlist (máximo 25 playlists = 5 filas de 5 botones)
+        const buttons = [];
+        const maxPlaylists = Math.min(userData.playlists.length, 25);
+
+        for (let i = 0; i < maxPlaylists; i++) {
+          const playlist = userData.playlists[i];
+          // Crear customId único con el índice de la playlist
+          buttons.push(
+            new ButtonBuilder()
+              .setCustomId(`playlist_load_${userId}_${i}`)
+              .setLabel(`${i + 1}. ${playlist.name.substring(0, 50)}`)
+              .setStyle(ButtonStyle.Primary)
+              .setEmoji('▶️')
+          );
+        }
+
+        // Organizar botones en filas (máximo 5 botones por fila)
+        const rows = [];
+        for (let i = 0; i < buttons.length; i += 5) {
+          const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + 5));
+          rows.push(row);
+        }
+
+        return interaction.reply({
+          embeds: [embed],
+          components: rows,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // VER: Muestra las canciones de una playlist
+      else if (subcommand === 'ver') {
+        const nombre = interaction.options.getString('nombre');
+        const playlist = userData.playlists.find(p => p.name.toLowerCase() === nombre.toLowerCase());
+
+        if (!playlist) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NOT_FOUND(nombre),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        if (playlist.songs.length === 0) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.EMPTY(nombre),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const { EmbedBuilder } = require('discord.js');
+
+        // Mostrar hasta 10 canciones
+        const songsToShow = playlist.songs.slice(0, 10);
+        const remaining = playlist.songs.length - 10;
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle(`${EMOJIS.SHAKUHACHI} Playlist: ${playlist.name}`)
+          .setDescription(
+            songsToShow.map((song, i) =>
+              `**${i + 1}.** [${song.title}](${song.url})\n` +
+              `   └ ⏱️ ${song.duration || 'Desconocido'}`
+            ).join('\n\n') +
+            (remaining > 0 ? `\n\n*...y ${remaining} canción${remaining !== 1 ? 'es' : ''} más*` : '')
+          )
+          .addFields(
+            { name: '🎵 Total', value: `${playlist.songs.length} canciones`, inline: true },
+            { name: '▶️ Reproducciones', value: `${playlist.playCount} veces`, inline: true },
+            { name: '📅 Creada', value: `<t:${Math.floor(playlist.createdAt / 1000)}:R>`, inline: true }
+          )
+          .setFooter({ text: MESSAGES.MUSIC.FOOTER })
+          .setTimestamp();
+
+        return interaction.reply({
+          embeds: [embed],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // ELIMINAR: Elimina una playlist
+      else if (subcommand === 'eliminar') {
+        const nombre = interaction.options.getString('nombre');
+        const playlistIndex = userData.playlists.findIndex(p => p.name.toLowerCase() === nombre.toLowerCase());
+
+        if (playlistIndex === -1) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NOT_FOUND(nombre),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        userData.playlists.splice(playlistIndex, 1);
+        dataManager.updateUser(userId, guildId, { playlists: userData.playlists });
+
+        return interaction.reply({
+          content: MESSAGES.PLAYLISTS.DELETED(nombre),
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // RENOMBRAR: Cambia el nombre de una playlist
+      else if (subcommand === 'renombrar') {
+        const nombreActual = interaction.options.getString('nombre_actual');
+        const nombreNuevo = interaction.options.getString('nombre_nuevo');
+
+        const playlist = userData.playlists.find(p => p.name.toLowerCase() === nombreActual.toLowerCase());
+
+        if (!playlist) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NOT_FOUND(nombreActual),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Validar nuevo nombre
+        if (nombreNuevo.length < 2 || nombreNuevo.length > 50) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NAME_TOO_SHORT,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar que el nuevo nombre no exista
+        const existingPlaylist = userData.playlists.find(p => p.name.toLowerCase() === nombreNuevo.toLowerCase());
+        if (existingPlaylist) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.ALREADY_EXISTS(nombreNuevo),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        playlist.name = nombreNuevo;
+        dataManager.updateUser(userId, guildId, { playlists: userData.playlists });
+
+        return interaction.reply({
+          content: MESSAGES.PLAYLISTS.RENAMED(nombreActual, nombreNuevo),
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // AGREGAR: Agrega una canción a una playlist
+      else if (subcommand === 'agregar') {
+        const nombrePlaylist = interaction.options.getString('playlist');
+        const cancion = interaction.options.getString('cancion');
+
+        const playlist = userData.playlists.find(p => p.name.toLowerCase() === nombrePlaylist.toLowerCase());
+
+        if (!playlist) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NOT_FOUND(nombrePlaylist),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar límite de canciones
+        const MAX_SONGS = CONSTANTS.MUSIC?.MAX_PLAYLIST_SIZE || 50;
+        if (playlist.songs.length >= MAX_SONGS) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.SONG_LIMIT_REACHED(MAX_SONGS),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        try {
+          const musicManager = require('./utils/musicManager');
+
+          // Buscar la canción
+          const results = await musicManager.searchSongs(cancion, { limit: 1 });
+
+          if (!results || results.length === 0) {
+            return interaction.editReply({
+              content: MESSAGES.MUSIC.NO_RESULTS
+            });
+          }
+
+          const song = results[0];
+
+          // Agregar a la playlist
+          playlist.songs.push({
+            title: song.title,
+            url: song.url,
+            duration: song.duration,
+            thumbnail: song.thumbnail,
+            channel: song.channel
+          });
+
+          dataManager.updateUser(userId, guildId, { playlists: userData.playlists });
+
+          return interaction.editReply({
+            content: MESSAGES.PLAYLISTS.SONG_ADDED(song.title, nombrePlaylist)
+          });
+        } catch (error) {
+          console.error('Error agregando canción a playlist:', error);
+          return interaction.editReply({
+            content: MESSAGES.ERRORS.GENERIC
+          });
+        }
+      }
+
+      // QUITAR: Quita una canción de una playlist
+      else if (subcommand === 'quitar') {
+        const nombrePlaylist = interaction.options.getString('playlist');
+        const posicion = interaction.options.getInteger('posicion');
+
+        const playlist = userData.playlists.find(p => p.name.toLowerCase() === nombrePlaylist.toLowerCase());
+
+        if (!playlist) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.NOT_FOUND(nombrePlaylist),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        if (playlist.songs.length === 0) {
+          return interaction.reply({
+            content: MESSAGES.PLAYLISTS.EMPTY(nombrePlaylist),
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Validar posición
+        if (posicion < 1 || posicion > playlist.songs.length) {
+          return interaction.reply({
+            content: `❌ Posición inválida. La playlist tiene ${playlist.songs.length} canción${playlist.songs.length !== 1 ? 'es' : ''}.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const removedSong = playlist.songs.splice(posicion - 1, 1)[0];
+        dataManager.updateUser(userId, guildId, { playlists: userData.playlists });
+
+        return interaction.reply({
+          content: MESSAGES.PLAYLISTS.SONG_REMOVED(removedSong.title, nombrePlaylist),
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    }
+
+    // ==================== AYUDA DE MÚSICA ====================
+    else if (commandName === 'ayudamusica' || commandName === 'helpmusic') {
+      const { EmbedBuilder } = require('discord.js');
+
+      const embed = new EmbedBuilder()
+        .setColor(COLORS.PRIMARY)
+        .setTitle(`${EMOJIS.SHAKUHACHI} Comandos del Dojo del Sonido`)
+        .setDescription('El shakuhachi resuena en el dojo. Estos son los comandos disponibles:')
+        .addFields(
+          {
+            name: '🎵 Reproducción',
+            value: '`/tocar [canción/url]` - Reproduce una canción\n' +
+                   '`/pausar` - Pausa la reproducción\n' +
+                   '`/reanudar` - Reanuda la reproducción\n' +
+                   '`/siguiente` - Salta a la siguiente canción\n' +
+                   '`/detener` - Detiene la música y limpia la cola'
+          },
+          {
+            name: '📋 Cola',
+            value: '`/cola` - Muestra la cola de reproducción\n' +
+                   '`/ahora` - Muestra la canción actual\n' +
+                   '`/limpiar` - Limpia la cola\n' +
+                   '`/saltar [posición]` - Salta a una canción específica\n' +
+                   '`/remover [posición]` - Quita una canción de la cola'
+          },
+          {
+            name: '🎛️ Control',
+            value: '`/volumen [0-100]` - Ajusta el volumen\n' +
+                   '`/mezclar` - Mezcla la cola aleatoriamente\n' +
+                   '`/repetir [modo]` - Cambia el modo de repetición\n' +
+                   '`/buscar [término]` - Busca canciones'
+          },
+          {
+            name: '📚 Playlists',
+            value: '`/playlist crear [nombre]` - Crea una playlist vacía\n' +
+                   '`/playlist guardar [nombre]` - Guarda la cola actual\n' +
+                   '`/playlist cargar [nombre]` - Carga una playlist\n' +
+                   '`/playlist listar` - Muestra tus playlists\n' +
+                   '`/playlist ver [nombre]` - Ver canciones de una playlist\n' +
+                   '`/playlist eliminar [nombre]` - Elimina una playlist\n' +
+                   '`/playlist renombrar [actual] [nuevo]` - Renombra\n' +
+                   '`/playlist agregar [playlist] [canción]` - Agrega canción\n' +
+                   '`/playlist quitar [playlist] [posición]` - Quita canción'
+          }
+        )
+        .setFooter({ text: MESSAGES.MUSIC.FOOTER })
+        .setTimestamp();
+
+      return interaction.reply({
+        embeds: [embed],
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
     // Comando no reconocido
     else {
       console.warn(`⚠️ Comando no reconocido: ${commandName} (usado por ${interaction.user.tag})`);
@@ -5152,6 +6826,470 @@ client.on(Events.InteractionCreate, async (interaction) => {
     } else {
       await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
     }
+  }
+});
+
+// ==================== MANEJADOR DE BOTONES INTERACTIVOS DE MÚSICA (TIPO HYDRA) ====================
+client.on(Events.InteractionCreate, async (interaction) => {
+  // Solo manejar botones de música y playlist
+  if (!interaction.isButton()) return;
+  if (!interaction.customId || (!interaction.customId.startsWith('music_') && !interaction.customId.startsWith('playlist_load_'))) return;
+
+  // Manejar botones de carga de playlist
+  if (interaction.customId.startsWith('playlist_load_')) {
+    try {
+      // Extraer userId e índice del customId: playlist_load_<userId>_<index>
+      const parts = interaction.customId.split('_');
+      const playlistUserId = parts[2];
+      const playlistIndex = parseInt(parts[3]);
+
+      // Verificar que el usuario que hace clic sea el dueño de la playlist
+      if (interaction.user.id !== playlistUserId) {
+        return interaction.reply({
+          content: '❌ Solo puedes cargar tus propias playlists.',
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Verificar que el usuario esté en un canal de voz
+      if (!interaction.member.voice.channel) {
+        return interaction.reply({
+          content: MESSAGES.MUSIC.NOT_IN_VOICE,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      // Obtener datos del usuario
+      const userData = dataManager.getUser(playlistUserId, interaction.guild.id);
+
+      if (!userData.playlists || !userData.playlists[playlistIndex]) {
+        return interaction.editReply({
+          content: '❌ Playlist no encontrada.'
+        });
+      }
+
+      const playlist = userData.playlists[playlistIndex];
+
+      if (playlist.songs.length === 0) {
+        return interaction.editReply({
+          content: MESSAGES.PLAYLISTS.EMPTY(playlist.name)
+        });
+      }
+
+      const musicManager = require('./utils/musicManager');
+      const ServerQueue = require('./utils/musicQueue');
+      const { createAudioPlayer } = require('@discordjs/voice');
+      const guildId = interaction.guild.id;
+      const voiceChannel = interaction.member.voice.channel;
+
+      let queue = musicManager.getQueue(guildId);
+
+      // Crear cola si no existe
+      if (!queue) {
+        queue = new ServerQueue(
+          interaction.guild,
+          voiceChannel,
+          interaction.channel
+        );
+        musicManager.setQueue(guildId, queue);
+      }
+
+      const wasPlaying = queue.isPlaying;
+
+      // Si el bot no está conectado a voz, conectarlo al canal del usuario
+      if (!queue.connection) {
+        queue.connection = await musicManager.connectToChannel(voiceChannel);
+        queue.voiceChannel = voiceChannel;
+        queue.textChannel = interaction.channel;
+        musicManager.setupConnectionListeners(queue.connection, guildId);
+      }
+
+      // Si no tiene player, crear uno
+      if (!queue.player) {
+        queue.player = createAudioPlayer();
+        queue.connection.subscribe(queue.player);
+        musicManager.setupPlayerListeners(queue);
+      }
+
+      // Agregar todas las canciones a la cola
+      let addedCount = 0;
+      for (const song of playlist.songs) {
+        if (queue.songs.length < (CONSTANTS.MUSIC?.MAX_QUEUE_SIZE || 100)) {
+          queue.addSong(song);
+          addedCount++;
+        }
+      }
+
+      // Incrementar contador de reproducción
+      playlist.playCount++;
+      dataManager.updateUser(playlistUserId, interaction.guild.id, { playlists: userData.playlists });
+
+      // Si no hay nada reproduciéndose, empezar
+      if (!wasPlaying && !queue.nowPlaying) {
+        await musicManager.playSong(queue);
+      }
+
+      return interaction.editReply({
+        content: MESSAGES.PLAYLISTS.LOADED(playlist.name, addedCount)
+      });
+
+    } catch (error) {
+      console.error('Error cargando playlist desde botón:', error);
+      if (!interaction.replied && !interaction.deferred) {
+        return interaction.reply({
+          content: '❌ Error al cargar la playlist.',
+          flags: MessageFlags.Ephemeral
+        });
+      } else {
+        return interaction.editReply({
+          content: '❌ Error al cargar la playlist.'
+        });
+      }
+    }
+    return; // Salir después de manejar el botón de playlist
+  }
+
+  try {
+    const musicManager = require('./utils/musicManager');
+    const queue = musicManager.getQueue(interaction.guild.id);
+
+    // Verificar que hay una cola activa
+    if (!queue || (!queue.nowPlaying && queue.songs.length === 0)) {
+      return interaction.reply({
+        content: '❌ No hay música reproduciéndose actualmente.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    // Verificar que el usuario esté en el mismo canal de voz
+    if (interaction.member.voice.channel?.id !== queue.voiceChannel?.id) {
+      return interaction.reply({
+        content: '❌ Debes estar en el mismo canal de voz que el bot para usar estos controles.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    const customId = interaction.customId;
+
+    // Manejar cada botón
+    switch (customId) {
+      case 'music_pause':
+        if (queue.isPaused) {
+          await musicHandlers.handleResume(interaction);
+        } else {
+          await musicHandlers.handlePause(interaction);
+        }
+        break;
+
+      case 'music_skip':
+        await musicHandlers.handleSkip(interaction);
+        break;
+
+      case 'music_stop':
+        await musicHandlers.handleStop(interaction);
+        break;
+
+      case 'music_shuffle':
+        await musicHandlers.handleShuffle(interaction);
+        break;
+
+      case 'music_loop':
+        // Cambiar modo de loop: off -> song -> queue -> off
+        if (queue.loop === 'off') {
+          queue.loop = 'song';
+        } else if (queue.loop === 'song') {
+          queue.loop = 'queue';
+        } else {
+          queue.loop = 'off';
+        }
+        await interaction.reply({
+          content: `🔁 Modo de repetición: **${queue.loop === 'off' ? 'Desactivado' : queue.loop === 'song' ? 'Canción' : 'Cola'}**`,
+          flags: MessageFlags.Ephemeral
+        });
+        break;
+
+      case 'music_queue':
+        await musicHandlers.handleQueue(interaction);
+        break;
+
+      case 'music_volume_down':
+        if (queue.volume > 0) {
+          queue.volume = Math.max(0, queue.volume - 10);
+          if (queue.player?.state?.resource?.volume) {
+            queue.player.state.resource.volume.setVolume(queue.volume / 100);
+          }
+          await interaction.reply({
+            content: `🔉 Volumen: **${queue.volume}%**`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        break;
+
+      case 'music_volume_up':
+        if (queue.volume < 100) {
+          queue.volume = Math.min(100, queue.volume + 10);
+          if (queue.player?.state?.resource?.volume) {
+            queue.player.state.resource.volume.setVolume(queue.volume / 100);
+          }
+          await interaction.reply({
+            content: `🔊 Volumen: **${queue.volume}%**`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        break;
+
+      case 'music_lyrics':
+        // Obtener letras de la canción actual
+        if (!queue.nowPlaying) {
+          return interaction.reply({
+            content: '❌ No hay ninguna canción reproduciéndose.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        
+        try {
+          const { EmbedBuilder } = require('discord.js');
+          const fetch = require('node-fetch');
+          const song = queue.nowPlaying;
+          
+          // Extraer artista y título de la canción
+          // Formato común: "Artista - Título" o solo "Título"
+          let artist = '';
+          let title = song.title;
+          
+          if (song.title.includes(' - ')) {
+            const parts = song.title.split(' - ');
+            artist = parts[0].trim();
+            title = parts.slice(1).join(' - ').trim();
+          }
+          
+          // Intentar obtener letras de lyrics.ovh (API gratuita)
+          let lyrics = null;
+          try {
+            const searchUrl = artist 
+              ? `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`
+              : `https://api.lyrics.ovh/v1/${encodeURIComponent(title)}`;
+            
+            const response = await fetch(searchUrl);
+            if (response.ok) {
+              const data = await response.json();
+              lyrics = data.lyrics;
+            }
+          } catch (error) {
+            console.warn('Error obteniendo letras:', error.message);
+          }
+          
+          if (!lyrics) {
+            const searchQuery = artist ? `${artist} ${title}` : title;
+            const searchUrl = `https://www.letras.com/buscar/?q=${encodeURIComponent(searchQuery)}`;
+            const linkButton = new ButtonBuilder()
+              .setLabel('🔎 Buscar letra en letras.com')
+              .setStyle(ButtonStyle.Link)
+              .setURL(searchUrl);
+            const row = new ActionRowBuilder().addComponents(linkButton);
+
+            return interaction.editReply({
+              content: `❌ No se encontraron letras para **${song.title}**.\n\n💡 Puedes buscar manualmente:`,
+              components: [row]
+            });
+          }
+          
+          // Limitar letras a 2000 caracteres (límite de Discord)
+          const lyricsPreview = lyrics.length > 2000 
+            ? lyrics.substring(0, 1997) + '...'
+            : lyrics;
+          
+          const lyricsEmbed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle(`📜 Letra de: ${song.title}`)
+            .setDescription(`\`\`\`${lyricsPreview}\`\`\``)
+            .setFooter({ text: MESSAGES.FOOTER?.DEFAULT || '🎋 Dojo del Sonido • Demon Hunter' })
+            .setTimestamp();
+          
+          if (song.thumbnail) {
+            lyricsEmbed.setThumbnail(song.thumbnail);
+          }
+          
+          await interaction.editReply({ embeds: [lyricsEmbed] });
+        } catch (error) {
+          console.error('Error obteniendo letras:', error);
+          await interaction.editReply({
+            content: '❌ Error al obtener las letras. Intenta más tarde.'
+          });
+        }
+        break;
+
+      case 'music_save_playlist':
+        // Guardar la cola actual como playlist
+        if (queue.songs.length === 0 && !queue.nowPlaying) {
+          return interaction.reply({
+            content: '❌ No hay canciones en la cola para guardar.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        
+        // Mostrar modal para ingresar nombre de playlist
+        const modal = new ModalBuilder()
+          .setCustomId('save_playlist_modal')
+          .setTitle('💾 Guardar Playlist');
+        
+        const playlistNameInput = new TextInputBuilder()
+          .setCustomId('playlist_name')
+          .setLabel('Nombre de la playlist')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Mi Playlist Favorita')
+          .setRequired(true)
+          .setMaxLength(50)
+          .setMinLength(2);
+        
+        const actionRow = new ActionRowBuilder().addComponents(playlistNameInput);
+        modal.addComponents(actionRow);
+        
+        await interaction.showModal(modal);
+        break;
+
+      case 'music_refresh':
+        // Actualizar panel
+        if (queue.textChannel && queue.panelMessageId) {
+          const MusicPanel = require('./utils/musicPanel');
+          await MusicPanel.createOrUpdatePanel(queue, queue.textChannel);
+          await interaction.reply({
+            content: '✅ Panel actualizado',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+        break;
+
+      default:
+        await interaction.reply({
+          content: '❌ Acción no reconocida',
+          flags: MessageFlags.Ephemeral
+        });
+    }
+
+    // Actualizar panel después de cada acción (excepto refresh y save_playlist que ya lo hacen)
+    if (customId !== 'music_refresh' && customId !== 'music_save_playlist' && customId !== 'music_lyrics' && queue.textChannel && queue.panelMessageId) {
+      const MusicPanel = require('./utils/musicPanel');
+      setTimeout(async () => {
+        try {
+          await MusicPanel.createOrUpdatePanel(queue, queue.textChannel);
+        } catch (error) {
+          console.error('Error actualizando panel después de botón:', error);
+        }
+      }, 500);
+    }
+
+  } catch (error) {
+    console.error('Error manejando botón de música:', error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({
+        content: '❌ Ocurrió un error al procesar esta acción.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+  }
+});
+
+// ==================== MANEJADOR DE MODALES (GUARDAR PLAYLIST) ====================
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isModalSubmit()) return;
+  if (interaction.customId !== 'save_playlist_modal') return;
+
+  try {
+    const playlistName = interaction.fields.getTextInputValue('playlist_name');
+    const musicManager = require('./utils/musicManager');
+    const queue = musicManager.getQueue(interaction.guild.id);
+
+    if (!queue || (queue.songs.length === 0 && !queue.nowPlaying)) {
+      return interaction.reply({
+        content: '❌ No hay canciones en la cola para guardar.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    // Validar nombre
+    if (playlistName.length < 2 || playlistName.length > 50) {
+      return interaction.reply({
+        content: '❌ El nombre de la playlist debe tener entre 2 y 50 caracteres.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    // Obtener todas las canciones (actual + cola)
+    const allSongs = [];
+    if (queue.nowPlaying) {
+      allSongs.push(queue.nowPlaying);
+    }
+    allSongs.push(...queue.songs);
+
+    if (allSongs.length === 0) {
+      return interaction.reply({
+        content: '❌ No hay canciones para guardar.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    // Guardar playlist usando dataManager
+    const userId = interaction.user.id;
+    const guildId = interaction.guild.id;
+    const userData = dataManager.getUser(userId, guildId);
+    
+    if (!userData.playlists) {
+      userData.playlists = [];
+    }
+
+    // Verificar si ya existe una playlist con ese nombre
+    const existingPlaylist = userData.playlists.find(p => p.name.toLowerCase() === playlistName.toLowerCase());
+    if (existingPlaylist) {
+      return interaction.reply({
+        content: `❌ Ya tienes una playlist llamada **${playlistName}**. Usa otro nombre.`,
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    // Verificar límite de playlists
+    const MAX_PLAYLISTS = CONSTANTS.MUSIC?.MAX_PLAYLISTS || 10;
+    if (userData.playlists.length >= MAX_PLAYLISTS) {
+      return interaction.reply({
+        content: `❌ Has alcanzado el límite de ${MAX_PLAYLISTS} playlists. Elimina alguna para crear una nueva.`,
+        flags: MessageFlags.Ephemeral
+      });
+    }
+
+    // Crear nueva playlist
+    const newPlaylist = {
+      name: playlistName,
+      songs: allSongs.map(song => ({
+        title: song.title,
+        url: song.url,
+        duration: song.duration,
+        thumbnail: song.thumbnail,
+        channel: song.channel
+      })),
+      createdAt: Date.now(),
+      playCount: 0
+    };
+
+    userData.playlists.push(newPlaylist);
+    dataManager.updateUser(userId, guildId, { playlists: userData.playlists });
+
+    await interaction.reply({
+      content: `✅ **Playlist guardada exitosamente**\n📚 **${playlistName}**\n🎵 ${allSongs.length} canciones guardadas`,
+      flags: MessageFlags.Ephemeral
+    });
+
+    console.log(`💾 ${interaction.user.tag} guardó playlist "${playlistName}" con ${allSongs.length} canciones`);
+
+  } catch (error) {
+    console.error('Error guardando playlist:', error);
+    await interaction.reply({
+      content: '❌ Error al guardar la playlist. Intenta más tarde.',
+      flags: MessageFlags.Ephemeral
+    });
   }
 });
 
@@ -5197,3 +7335,7 @@ client.login(process.env.DISCORD_TOKEN).catch((error) => {
   console.error('Habilita: SERVER MEMBERS INTENT y MESSAGE CONTENT INTENT\n');
   process.exit(1);
 });
+
+
+
+

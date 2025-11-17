@@ -31,6 +31,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Magic numbers replaced with CONSTANTS
 - Backup/recovery system for data corruption
 
+### Modular Architecture (NEW - January 2025)
+
+**Status:** ✅ **Phase 1 Complete** - Event Handlers & Utilities Modularized
+
+The bot has been partially modularized to improve maintainability:
+
+**New Structure:**
+```
+events/          → Event handlers (ready, guildMemberAdd, voiceStateUpdate)
+handlers/        → Interaction handlers (buttons, modals)
+utils/helpers.js → Reusable utilities (sendWithRetry, caching, username fetching)
+utils/eventLoader.js → Dynamic event/handler loader
+```
+
+**Extracted (~1,000 lines):**
+- ✅ Event handlers (ready, guildMemberAdd, voiceStateUpdate)
+- ✅ Button/modal handlers (music controls, playlist save)
+- ✅ Helper utilities (retry logic, username caching)
+- ✅ Event loader system
+
+**See:** `MODULARIZATION_SUMMARY.md` for complete details
+
+**Backup:** Original `index.js` preserved as `index.js.backup`
+
 ## Running the Bot
 
 ```bash
