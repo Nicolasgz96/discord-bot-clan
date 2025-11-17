@@ -1,0 +1,51 @@
+{
+  "welcome": {
+    "enabled": true,
+    "channelId": "1437841501508993187",
+    "card": {
+      "backgroundImage": "https://i.imgur.com/usJd0V4.png",
+      "backgroundColor": "#2C2F33",
+      "cardBackgroundColor": "rgba(44, 47, 51, 0.95)",
+      "accentColor": "#00D4FF",
+      "titleColor": "#FFFFFF",
+      "descriptionColor": "#99AAB5",
+      "memberCountColor": "#99AAB5",
+      "font": "sans-serif"
+    }
+  },
+  "autoRole": {
+    "enabled": true,
+    "roleId": "1424326609225252958"
+  },
+  "commandsChannel": {
+    "enabled": true,
+    "channelId": "1439003262320771072"
+  },
+  "shopChannel": {
+    "enabled": true,
+    "channelId": "1439008269363577044"
+  },
+  "combatChannel": {
+    "enabled": true,
+    "channelId": "1439009626396823594"
+  },
+  "musicChannel": {
+    "enabled": true,
+    "channelId": "1439256046899040256"
+  }
+  ,
+  "purge": {
+    "enabled": true,
+    "channelIds": [
+      "1439003262320771072",
+      "1439009626396823594"
+    ],
+    "intervalHours": 24,
+    "runHour": 9,
+    "cutoffHours": 24,
+    "includeAll": true,
+    "includePinned": false,
+    "maxDeletesPerRun": 0,
+    "runOnStartup": false
+  }
+}

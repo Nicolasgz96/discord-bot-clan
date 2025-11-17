@@ -1,0 +1,19 @@
+[Unit]
+Description=Discord Welcome Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/discord-bot
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/discord-bot/bot.log
+StandardError=append:/home/ubuntu/discord-bot/bot-error.log
+
+# Variables de entorno
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e:*)",
+      "Bash(\"/mnt/c/Program Files/nodejs/node.exe\" -c src/config/constants.js)",
+      "Bash(\"/mnt/c/Program Files/nodejs/node.exe\" -c src/config/emojis.js)",
+      "Bash(\"/mnt/c/Program Files/nodejs/node.exe\" -e \"\nconst CONSTANTS = require(''./src/config/constants'');\nconsole.log(''✅ CONSTANTS.MUSIC cargado correctamente'');\nconsole.log(''📋 Propiedades:'');\nconsole.log(''  - SEARCH_RESULTS_LIMIT:'', CONSTANTS.MUSIC.SEARCH_RESULTS_LIMIT);\nconsole.log(''  - MAX_PLAYLIST_SIZE:'', CONSTANTS.MUSIC.MAX_PLAYLIST_SIZE);\nconsole.log(''  - DEFAULT_VOLUME:'', CONSTANTS.MUSIC.DEFAULT_VOLUME);\nconsole.log(''  - INACTIVITY_TIMEOUT:'', CONSTANTS.MUSIC.INACTIVITY_TIMEOUT);\nconsole.log(''  - DISCONNECT_DELAY:'', CONSTANTS.MUSIC.DISCONNECT_DELAY);\nconsole.log(''\\n✅ CONSTANTS.MUSIC está congelado:'', Object.isFrozen(CONSTANTS.MUSIC));\n\")",
+      "Bash(\"/mnt/c/Program Files/nodejs/node.exe\" -e:*)",
+      "Bash(\"/mnt/c/Program Files/nodejs/node.exe\" -c src/config/messages.js)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

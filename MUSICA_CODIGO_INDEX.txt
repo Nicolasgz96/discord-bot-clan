@@ -1,0 +1,266 @@
+// ========================================================================
+// CÓDIGO PARA AGREGAR A /mnt/c/Users/nico-/discord-bot/index.js
+// Sistema de Música "Dojo del Sonido"
+// ========================================================================
+
+// ==============================
+// PASO 1: IMPORTAR HANDLERS
+// ==============================
+// Agregar esta línea después de las importaciones de utils (línea ~30)
+
+const musicHandlers = require('./commands/handlers/musicHandlers');
+
+
+// ==============================
+// PASO 2: AGREGAR CASOS AL SWITCH
+// ==============================
+// Buscar el evento 'interactionCreate' y el switch de comandos
+// Agregar estos casos ANTES del 'default:' case
+
+// ========== SISTEMA DE MÚSICA (DOJO DEL SONIDO) ==========
+
+// Reproducción básica
+case 'tocar':
+case 'play':
+  await musicHandlers.handlePlay(interaction);
+  break;
+
+case 'pausar':
+case 'pause':
+  await musicHandlers.handlePause(interaction);
+  break;
+
+case 'reanudar':
+case 'resume':
+  await musicHandlers.handleResume(interaction);
+  break;
+
+case 'siguiente':
+case 'skip':
+  await musicHandlers.handleSkip(interaction);
+  break;
+
+case 'detener':
+case 'stop':
+  await musicHandlers.handleStop(interaction);
+  break;
+
+// Gestión de cola
+case 'cola':
+case 'queue':
+  await musicHandlers.handleQueue(interaction);
+  break;
+
+case 'ahora':
+case 'sonando':
+case 'nowplaying':
+case 'np':
+  await musicHandlers.handleNowPlaying(interaction);
+  break;
+
+case 'limpiar':
+case 'clear':
+  await musicHandlers.handleClear(interaction);
+  break;
+
+case 'saltar':
+case 'jump':
+  await musicHandlers.handleJump(interaction);
+  break;
+
+case 'remover':
+case 'remove':
+  await musicHandlers.handleRemove(interaction);
+  break;
+
+// Control y opciones
+case 'volumen':
+case 'volume':
+  await musicHandlers.handleVolume(interaction);
+  break;
+
+case 'buscar':
+case 'search':
+  await musicHandlers.handleSearch(interaction);
+  break;
+
+case 'mezclar':
+case 'shuffle':
+  await musicHandlers.handleShuffle(interaction);
+  break;
+
+case 'repetir':
+case 'loop':
+  await musicHandlers.handleLoop(interaction);
+  break;
+
+// ========== FIN DEL SISTEMA DE MÚSICA ==========
+
+
+// ========================================================================
+// INSTRUCCIONES DE INTEGRACIÓN
+// ========================================================================
+
+/*
+1. Copia la línea de import (PASO 1) y pégala después de las otras importaciones
+   Busca en index.js la sección de imports (línea ~30):
+
+   const voiceManager = require('./utils/voiceManager');
+   const dataManager = require('./utils/dataManager');
+   const musicHandlers = require('./commands/handlers/musicHandlers'); // <-- AGREGAR AQUÍ
+
+2. Copia todo el bloque del PASO 2 y pégalo en el switch de comandos
+   Busca en index.js el switch de commandName (aprox. línea 100-500):
+
+   switch (commandName) {
+     case 'testwelcome':
+       // ...código existente...
+       break;
+
+     // ...otros cases existentes...
+
+     // ========== PEGAR AQUÍ EL BLOQUE DEL PASO 2 ==========
+
+     default:
+       await interaction.reply({
+         content: MESSAGES.ERRORS.COMMAND_ERROR,
+         ephemeral: true
+       });
+   }
+
+3. Guarda el archivo (Ctrl+S)
+
+4. Registra los comandos slash:
+   npm run deploy
+
+5. Reinicia el bot:
+   npm start
+   # o
+   pm2 restart demon-hunter
+
+6. Prueba en Discord:
+   /tocar cancion: lofi hip hop
+
+¡Listo! El sistema de música estará funcionando.
+*/
+
+// ========================================================================
+// EJEMPLO COMPLETO DE SWITCH CON MÚSICA INTEGRADA
+// ========================================================================
+
+/*
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isCommand()) return;
+
+  const { commandName } = interaction;
+
+  try {
+    switch (commandName) {
+      // Comandos existentes...
+      case 'testwelcome':
+        // ...código existente...
+        break;
+
+      case 'help':
+        // ...código existente...
+        break;
+
+      case 'honor':
+        // ...código existente...
+        break;
+
+      // ...más comandos existentes...
+
+      // ========== SISTEMA DE MÚSICA ==========
+      case 'tocar':
+      case 'play':
+        await musicHandlers.handlePlay(interaction);
+        break;
+
+      case 'pausar':
+      case 'pause':
+        await musicHandlers.handlePause(interaction);
+        break;
+
+      case 'reanudar':
+      case 'resume':
+        await musicHandlers.handleResume(interaction);
+        break;
+
+      case 'siguiente':
+      case 'skip':
+        await musicHandlers.handleSkip(interaction);
+        break;
+
+      case 'detener':
+      case 'stop':
+        await musicHandlers.handleStop(interaction);
+        break;
+
+      case 'cola':
+      case 'queue':
+        await musicHandlers.handleQueue(interaction);
+        break;
+
+      case 'ahora':
+      case 'sonando':
+      case 'nowplaying':
+      case 'np':
+        await musicHandlers.handleNowPlaying(interaction);
+        break;
+
+      case 'volumen':
+      case 'volume':
+        await musicHandlers.handleVolume(interaction);
+        break;
+
+      case 'buscar':
+      case 'search':
+        await musicHandlers.handleSearch(interaction);
+        break;
+
+      case 'mezclar':
+      case 'shuffle':
+        await musicHandlers.handleShuffle(interaction);
+        break;
+
+      case 'repetir':
+      case 'loop':
+        await musicHandlers.handleLoop(interaction);
+        break;
+
+      case 'limpiar':
+      case 'clear':
+        await musicHandlers.handleClear(interaction);
+        break;
+
+      case 'saltar':
+      case 'jump':
+        await musicHandlers.handleJump(interaction);
+        break;
+
+      case 'remover':
+      case 'remove':
+        await musicHandlers.handleRemove(interaction);
+        break;
+      // ========== FIN DE MÚSICA ==========
+
+      default:
+        await interaction.reply({
+          content: MESSAGES.ERRORS.COMMAND_ERROR,
+          ephemeral: true
+        });
+    }
+  } catch (error) {
+    console.error('❌ Error en comando slash:', error);
+    await interaction.reply({
+      content: MESSAGES.ERRORS.COMMAND_ERROR,
+      ephemeral: true
+    }).catch(console.error);
+  }
+});
+*/
+
+// ========================================================================
+// FIN DEL CÓDIGO
+// ========================================================================
