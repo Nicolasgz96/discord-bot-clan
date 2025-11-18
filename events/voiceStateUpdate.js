@@ -80,6 +80,91 @@ module.exports = {
               // Marcar datos como modificados
               dataManager.dataModified.users = true;
 
+              // Check for new achievements
+              const achievementManager = require('../utils/achievementManager');
+              const CONSTANTS = require('../src/config/constants');
+              const newAchievements = achievementManager.checkAchievements(userId, guildId, userData);
+
+              // Notify user of new achievements
+              if (newAchievements.length > 0) {
+                for (const achievement of newAchievements) {
+                  const tierInfo = achievementManager.TIER_INFO[achievement.tier];
+                  const config = require('../config.json');
+
+                  // Send DM notification
+                  if (CONSTANTS.ACHIEVEMENTS.NOTIFY_DM) {
+                    try {
+                      const user = await client.users.fetch(userId);
+                      const EMOJIS_FULL = require('../src/config/emojis');
+                      await user.send(
+                        `🏆 **¡Nuevo Logro Desbloqueado!**\n\n` +
+                        `${achievement.emoji} **${achievement.name}** ${tierInfo.emoji} *(${tierInfo.name})*\n` +
+                        `*${achievement.description}*\n\n` +
+                        `**Recompensa:** ${achievement.reward?.koku || 0} ${EMOJIS_FULL.KOKU}` +
+                        (achievement.reward?.title ? ` + Título: **"${achievement.reward.title}"**` : '') +
+                        `\n\nUsa \`/logros\` para ver todos tus logros.`
+                      );
+                    } catch (e) {
+                      // Ignore DM failures
+                    }
+                  }
+
+                  // Send channel notification
+                  if (CONSTANTS.ACHIEVEMENTS.NOTIFY_CHANNEL && config.achievementsChannel?.enabled) {
+                    try {
+                      const { EmbedBuilder } = require('discord.js');
+                      const achievementsChannel = client.channels.cache.get(config.achievementsChannel.channelId);
+                      if (achievementsChannel) {
+                        const shouldAnnounce = CONSTANTS.ACHIEVEMENTS.ANNOUNCE_LEGENDARY
+                          ? (achievement.tier === 'legendary' || achievement.tier === 'platinum' || achievement.category === 'hidden')
+                          : true;
+
+                        if (shouldAnnounce) {
+                          const EMOJIS_FULL = require('../src/config/emojis');
+                          const embed = new EmbedBuilder()
+                            .setColor(tierInfo.color)
+                            .setTitle(`${achievement.emoji} ¡Logro Desbloqueado! ${tierInfo.emoji}`)
+                            .setDescription(
+                              `<@${userId}> ha desbloqueado:\n\n` +
+                              `**${achievement.name}**\n` +
+                              `*${achievement.description}*`
+                            )
+                            .addFields({
+                              name: 'Recompensa',
+                              value: `${achievement.reward?.koku || 0} ${EMOJIS_FULL.KOKU}` +
+                                     (achievement.reward?.title ? ` + Título: **"${achievement.reward.title}"**` : ''),
+                              inline: true
+                            })
+                            .setFooter({ text: `Tier: ${tierInfo.name}` })
+                            .setTimestamp();
+
+                          await achievementsChannel.send({ embeds: [embed] });
+                        }
+                      }
+                    } catch (e) {
+                      console.error('Error enviando notificación de logro al canal:', e.message);
+                    }
+                  }
+                }
+              }
+
+              // ========== TRACK VOICE TIME FOR ACTIVE EVENTS ==========
+              // Check if user is participating in any voice marathon events
+              try {
+                const { getEventManager, EVENT_STATUS } = require('../utils/eventManager');
+                const eventManager = getEventManager();
+                const activeEvents = eventManager.getActiveEvents(guildId);
+
+                for (const event of activeEvents) {
+                  if (event.type === 'voice_marathon' && event.participants.includes(userId)) {
+                    eventManager.trackVoiceTime(event.id, userId, totalMinutes);
+                  }
+                }
+              } catch (e) {
+                // Ignore event tracking errors
+              }
+              // ========== END VOICE MARATHON TRACKING ==========
+
               console.log(`${EMOJIS.VOICE} ${oldState.member.user.tag} ganó ${honorToGrant} honor + ${kokuToGrant} koku por ${minutesSinceLastGrant} minutos restantes en voz (total: ${totalMinutes} min)`);
             } catch (error) {
               console.error('Error otorgando honor/koku por voz:', error.message);

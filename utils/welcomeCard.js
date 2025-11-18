@@ -34,16 +34,18 @@ const CANVAS_CONFIG = {
 /**
  * Creates a personalized welcome card for a new member
  * @param {GuildMember} member - The Discord guild member who joined
+ * @param {Object} userData - Optional user data with custom background
  * @returns {Promise<AttachmentBuilder>} - The welcome card as a Discord attachment
  */
-async function createWelcomeCard(member) {
+async function createWelcomeCard(member, userData = null) {
   const canvas = createCanvas(CANVAS_CONFIG.WIDTH, CANVAS_CONFIG.HEIGHT);
   const ctx = canvas.getContext('2d');
   const cardConfig = config.welcome.card;
 
   try {
-    // 1) Fondo
-    await drawBackground(ctx, cardConfig);
+    // 1) Fondo (check for custom background first)
+    const customBackground = userData?.customization?.backgroundUrl;
+    await drawBackground(ctx, cardConfig, customBackground);
 
     // 2) Panel inferior de cobertura (tapa las letras japonesas del arte)
     drawBottomCoverPanel(ctx);
@@ -67,12 +69,18 @@ async function createWelcomeCard(member) {
 
 /**
  * Draws the background image (stretched to fill canvas)
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} cardConfig - Card configuration
+ * @param {string} customBackground - Optional custom background URL (takes priority)
  */
-async function drawBackground(ctx, cardConfig) {
-  if (cardConfig.backgroundImage) {
+async function drawBackground(ctx, cardConfig, customBackground = null) {
+  // Priority: custom background > config background > solid color
+  const backgroundUrl = customBackground || cardConfig.backgroundImage;
+
+  if (backgroundUrl) {
     try {
-      const background = await loadImage(cardConfig.backgroundImage);
-      // Estirar imagen para llenar todo el canvas
+      const background = await loadImage(backgroundUrl);
+      // Stretch image to fill entire canvas
       ctx.drawImage(background, 0, 0, CANVAS_CONFIG.WIDTH, CANVAS_CONFIG.HEIGHT);
       return;
     } catch (error) {

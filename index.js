@@ -147,6 +147,21 @@ client.on(Events.MessageCreate, async (message) => {
         const userData = dataManager.addHonor(userId, guildId, CONSTANTS.HONOR.PER_MESSAGE);
         if (userData.userId !== client.user.id && !userData.isBot) {
           userData.koku = (userData.koku || 0) + CONSTANTS.ECONOMY.PER_MESSAGE;
+
+          // Track koku gain for active Koku Rush events
+          try {
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+            const activeEvents = eventManager.getActiveEvents(guildId);
+
+            for (const event of activeEvents) {
+              if (event.type === 'koku_rush' && event.participants.includes(userId)) {
+                eventManager.trackKokuGain(event.id, userId, userData.koku);
+              }
+            }
+          } catch (e) {
+            // Ignore event tracking errors
+          }
         }
 
         // Notificaciones: si hubo cambio de rango, notificar al usuario
@@ -175,8 +190,85 @@ client.on(Events.MessageCreate, async (message) => {
           dataManager.updateClanStats(userData.clanId);
         }
 
+        // Track night messages (2-6 AM) for Night Owl achievement
+        const hour = new Date().getHours();
+        if (hour >= 2 && hour < 6) {
+          if (!userData.stats) userData.stats = {};
+          userData.stats.nightMessages = (userData.stats.nightMessages || 0) + 1;
+        }
+
+        // Track midnight messages (exactly 12 AM) for hidden achievement
+        if (hour === 0) {
+          if (!userData.stats) userData.stats = {};
+          userData.stats.midnightMessages = (userData.stats.midnightMessages || 0) + 1;
+        }
+
         // Marcar datos como modificados
         dataManager.dataModified.users = true;
+
+        // Check for new achievements
+        const achievementManager = require('./utils/achievementManager');
+        const newAchievements = achievementManager.checkAchievements(userId, guildId, userData);
+
+        // Notify user of new achievements
+        if (newAchievements.length > 0) {
+          for (const achievement of newAchievements) {
+            const tierInfo = achievementManager.TIER_INFO[achievement.tier];
+
+            // Send DM notification
+            if (CONSTANTS.ACHIEVEMENTS.NOTIFY_DM) {
+              try {
+                const user = await client.users.fetch(userId);
+                await user.send(
+                  `🏆 **¡Nuevo Logro Desbloqueado!**\n\n` +
+                  `${achievement.emoji} **${achievement.name}** ${tierInfo.emoji} *(${tierInfo.name})*\n` +
+                  `*${achievement.description}*\n\n` +
+                  `**Recompensa:** ${achievement.reward?.koku || 0} ${EMOJIS.KOKU}` +
+                  (achievement.reward?.title ? ` + Título: **"${achievement.reward.title}"**` : '') +
+                  `\n\nUsa \`/logros\` para ver todos tus logros.`
+                );
+              } catch (e) {
+                // Ignore DM failures
+              }
+            }
+
+            // Send channel notification
+            if (CONSTANTS.ACHIEVEMENTS.NOTIFY_CHANNEL && config.achievementsChannel?.enabled) {
+              try {
+                const achievementsChannel = client.channels.cache.get(config.achievementsChannel.channelId);
+                if (achievementsChannel) {
+                  // Only announce legendary/hidden achievements publicly, or all if configured
+                  const shouldAnnounce = CONSTANTS.ACHIEVEMENTS.ANNOUNCE_LEGENDARY
+                    ? (achievement.tier === 'legendary' || achievement.tier === 'platinum' || achievement.category === 'hidden')
+                    : true;
+
+                  if (shouldAnnounce) {
+                    const embed = new EmbedBuilder()
+                      .setColor(tierInfo.color)
+                      .setTitle(`${achievement.emoji} ¡Logro Desbloqueado! ${tierInfo.emoji}`)
+                      .setDescription(
+                        `<@${userId}> ha desbloqueado:\n\n` +
+                        `**${achievement.name}**\n` +
+                        `*${achievement.description}*`
+                      )
+                      .addFields({
+                        name: 'Recompensa',
+                        value: `${achievement.reward?.koku || 0} ${EMOJIS.KOKU}` +
+                               (achievement.reward?.title ? ` + Título: **"${achievement.reward.title}"**` : ''),
+                        inline: true
+                      })
+                      .setFooter({ text: `Tier: ${tierInfo.name}` })
+                      .setTimestamp();
+
+                    await achievementsChannel.send({ embeds: [embed] });
+                  }
+                }
+              } catch (e) {
+                console.error('Error enviando notificación de logro al canal:', e.message);
+              }
+            }
+          }
+        }
 
         // Establecer cooldown de 1 minuto
         dataManager.setCooldown(userId, 'honor_message', CONSTANTS.COOLDOWNS.HONOR_MESSAGE);
@@ -2323,6 +2415,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
       userData.dailyStreak = newStreak;
       dataManager.dataModified.users = true;
 
+      // Track koku gain for active Koku Rush events
+      try {
+        const { getEventManager } = require('./utils/eventManager');
+        const eventManager = getEventManager();
+        const activeEvents = eventManager.getActiveEvents(guildId);
+
+        for (const event of activeEvents) {
+          if (event.type === 'koku_rush' && event.participants.includes(userId)) {
+            eventManager.trackKokuGain(event.id, userId, userData.koku);
+          }
+        }
+      } catch (e) {
+        // Ignore event tracking errors
+      }
+
       // Crear embed de recompensa
       const embed = new EmbedBuilder()
         .setColor(COLORS.KOKU)
@@ -4283,6 +4390,958 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.reply({ embeds: [embed] });
       console.log(`${EMOJIS.SCROLL} ${interaction.user.tag} consultó perfil de ${targetUser.tag}`);
+    }
+
+    // ==================== SISTEMA DE LOGROS ====================
+
+    // /logros, /achievements, /medallas - Mostrar logros del usuario
+    else if (commandName === 'logros' || commandName === 'achievements' || commandName === 'medallas') {
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+
+      await interaction.deferReply();
+
+      const achievementManager = require('./utils/achievementManager');
+      const { unlocked, locked, stats } = achievementManager.getUserAchievements(userId, guildId);
+      const userData = dataManager.getUser(userId, guildId);
+
+      // Create main embed
+      const embed = new EmbedBuilder()
+        .setColor(COLORS.PRIMARY)
+        .setAuthor({
+          name: `${interaction.user.username} - Sistema de Logros`,
+          iconURL: interaction.user.displayAvatarURL()
+        })
+        .setDescription(
+          `${EMOJIS.HONOR} **Progreso Total:** ${stats.total}/${stats.totalPossible} logros desbloqueados (${stats.completion}%)\n` +
+          `${EMOJIS.KOKU} **Koku Ganado por Logros:** ${unlocked.reduce((sum, a) => sum + (a.reward?.koku || 0), 0)} koku\n\n`
+        )
+        .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+        .setTimestamp();
+
+      // Add latest achievement
+      if (stats.latestUnlock) {
+        const unlockedDate = new Date(stats.latestUnlock.unlockedAt);
+        const tierInfo = achievementManager.TIER_INFO[stats.latestUnlock.tier];
+        embed.addFields({
+          name: `🎉 Último Logro Desbloqueado`,
+          value: `${stats.latestUnlock.emoji} **${stats.latestUnlock.name}** ${tierInfo.emoji}\n` +
+                 `*${stats.latestUnlock.description}*\n` +
+                 `📅 ${unlockedDate.toLocaleDateString('es-ES')}`,
+          inline: false
+        });
+      }
+
+      // Group unlocked achievements by category
+      const categoriesShown = new Set();
+      for (const [category, achievements] of Object.entries(stats.byCategory)) {
+        if (achievements.length > 0) {
+          const categoryEmoji = achievementManager.CATEGORY_EMOJIS[category];
+          const categoryName = {
+            social: 'Social',
+            honor: 'Honor',
+            economy: 'Economía',
+            clan: 'Clan',
+            music: 'Música',
+            special: 'Especial',
+            hidden: 'Secreto'
+          }[category] || category;
+
+          const achList = achievements
+            .sort((a, b) => (b.unlockedAt || 0) - (a.unlockedAt || 0))
+            .slice(0, 5) // Show max 5 per category
+            .map(a => {
+              const tierInfo = achievementManager.TIER_INFO[a.tier];
+              return `${a.emoji} **${a.name}** ${tierInfo.emoji}`;
+            })
+            .join('\n');
+
+          embed.addFields({
+            name: `${categoryEmoji} ${categoryName} (${achievements.length})`,
+            value: achList,
+            inline: true
+          });
+          categoriesShown.add(category);
+        }
+      }
+
+      // Show some locked achievements (next goals)
+      const nextGoals = locked
+        .filter(a => !a.hidden)
+        .slice(0, 3)
+        .map(a => {
+          const tierInfo = achievementManager.TIER_INFO[a.tier];
+          let progress = '';
+
+          // Show progress for some achievement types
+          if (a.requirement.type === 'messages') {
+            const current = userData.stats?.messagesCount || 0;
+            progress = ` (${current}/${a.requirement.count})`;
+          } else if (a.requirement.type === 'voiceMinutes') {
+            const current = userData.stats?.voiceMinutes || 0;
+            progress = ` (${current}/${a.requirement.count} min)`;
+          } else if (a.requirement.type === 'honor') {
+            const current = userData.honor || 0;
+            progress = ` (${current}/${a.requirement.count})`;
+          } else if (a.requirement.type === 'koku') {
+            const current = userData.koku || 0;
+            progress = ` (${current}/${a.requirement.count})`;
+          }
+
+          return `${a.emoji} **${a.name}** ${tierInfo.emoji}${progress}\n*${a.description}*`;
+        })
+        .join('\n\n');
+
+      if (nextGoals) {
+        embed.addFields({
+          name: '🎯 Próximos Objetivos',
+          value: nextGoals,
+          inline: false
+        });
+      }
+
+      // Add titles if user has any
+      if (userData.titles && userData.titles.length > 0) {
+        embed.addFields({
+          name: '👑 Títulos Desbloqueados',
+          value: userData.titles.map(t => `• ${t}`).join('\n'),
+          inline: false
+        });
+      }
+
+      await interaction.editReply({ embeds: [embed] });
+      console.log(`${EMOJIS.HONOR} ${interaction.user.tag} consultó sus logros (${stats.total}/${stats.totalPossible})`);
+    }
+
+    // ==================== PERSONALIZACIÓN DE PERFIL ====================
+
+    // /perfil - Sistema de personalización
+    else if (commandName === 'perfil') {
+      const subcommand = interaction.options.getSubcommand();
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+      const profileCustomization = require('./utils/profileCustomization');
+      const userData = dataManager.getUser(userId, guildId);
+
+      // ========== /perfil fondo ==========
+      if (subcommand === 'fondo') {
+        const imageUrl = interaction.options.getString('url');
+
+        try {
+          profileCustomization.setCustomBackground(userData, imageUrl);
+          dataManager.dataModified.users = true;
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} Fondo Actualizado`)
+            .setDescription(
+              `Tu fondo de perfil ha sido cambiado.\n\n` +
+              `**Vista previa:**`
+            )
+            .setImage(imageUrl)
+            .setFooter({ text: 'El fondo se mostrará en tu tarjeta de bienvenida y perfil' })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} cambió su fondo de perfil`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /perfil color ==========
+      else if (subcommand === 'color') {
+        const colorInput = interaction.options.getString('codigo');
+
+        try {
+          let hexColor = colorInput;
+
+          // Check if it's a preset name
+          if (!colorInput.startsWith('#')) {
+            const preset = profileCustomization.getColorPreset(colorInput);
+            hexColor = preset.color;
+          }
+
+          profileCustomization.setCustomColor(userData, hexColor);
+          dataManager.dataModified.users = true;
+
+          const embed = new EmbedBuilder()
+            .setColor(hexColor)
+            .setTitle(`${EMOJIS.SUCCESS} Color Actualizado`)
+            .setDescription(
+              `Tu color de embeds ha sido cambiado.\n\n` +
+              `**Nuevo color:** ${hexColor}\n` +
+              `Este embed muestra tu nuevo color.`
+            )
+            .setFooter({ text: 'El color se aplicará a tus embeds de perfil' })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} cambió su color a ${hexColor}`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /perfil titulo ==========
+      else if (subcommand === 'titulo') {
+        const title = interaction.options.getString('titulo');
+
+        try {
+          profileCustomization.setDisplayTitle(userData, title);
+          dataManager.dataModified.users = true;
+
+          const embed = new EmbedBuilder()
+            .setColor(userData.customization?.embedColor || COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} Título Actualizado`)
+            .setAuthor({
+              name: profileCustomization.getDisplayNameWithTitle(interaction.user.username, userData),
+              iconURL: interaction.user.displayAvatarURL()
+            })
+            .setDescription(
+              `Tu título visible ha sido actualizado.\n\n` +
+              `**Nuevo título:** ${title}\n\n` +
+              `Ahora se mostrará en tus perfiles y comandos.`
+            )
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} estableció su título: ${title}`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /perfil bio ==========
+      else if (subcommand === 'bio') {
+        const bio = interaction.options.getString('texto');
+
+        try {
+          profileCustomization.setBio(userData, bio);
+          dataManager.dataModified.users = true;
+
+          const embed = new EmbedBuilder()
+            .setColor(userData.customization?.embedColor || COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} Biografía Actualizada`)
+            .setDescription(
+              `Tu biografía ha sido actualizada.\n\n` +
+              `**Nueva biografía:**\n` +
+              `*"${bio}"*`
+            )
+            .setFooter({ text: `${bio.length}/100 caracteres` })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} actualizó su biografía`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /perfil ver ==========
+      else if (subcommand === 'ver') {
+        const summary = profileCustomization.getCustomizationSummary(userData);
+
+        const embed = new EmbedBuilder()
+          .setColor(userData.customization?.embedColor || COLORS.PRIMARY)
+          .setTitle('🎨 Tu Personalización')
+          .setAuthor({
+            name: profileCustomization.getDisplayNameWithTitle(interaction.user.username, userData),
+            iconURL: interaction.user.displayAvatarURL()
+          })
+          .addFields(
+            {
+              name: '🖼️ Fondo de Perfil',
+              value: summary.hasCustomBackground
+                ? `[Ver imagen](${summary.backgroundUrl})`
+                : 'Por defecto',
+              inline: true
+            },
+            {
+              name: '🎨 Color de Embeds',
+              value: summary.embedColor,
+              inline: true
+            },
+            {
+              name: '👑 Título Visible',
+              value: summary.displayTitle,
+              inline: true
+            },
+            {
+              name: '📝 Biografía',
+              value: summary.bio,
+              inline: false
+            }
+          )
+          .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+          .setTimestamp();
+
+        // Add available titles
+        if (summary.availableTitles.length > 0) {
+          embed.addFields({
+            name: '🏆 Títulos Disponibles',
+            value: summary.availableTitles.map(t => `• ${t}`).join('\n'),
+            inline: false
+          });
+        }
+
+        // Show background if custom
+        if (summary.hasCustomBackground) {
+          embed.setImage(summary.backgroundUrl);
+        }
+
+        await interaction.reply({ embeds: [embed] });
+        console.log(`${EMOJIS.INFO} ${interaction.user.tag} consultó su personalización`);
+      }
+
+      // ========== /perfil colores ==========
+      else if (subcommand === 'colores') {
+        const presets = profileCustomization.getAllColorPresets();
+
+        const colorFields = Object.entries(presets).map(([key, preset]) => ({
+          name: `${preset.name} (\`${key}\`)`,
+          value: `Color: ${preset.color}`,
+          inline: true
+        }));
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle('🎨 Paleta de Colores')
+          .setDescription(
+            'Usa `/perfil color codigo:<nombre>` para aplicar un preset.\n' +
+            'También puedes usar código hexadecimal: `/perfil color codigo:#FF5733`'
+          )
+          .addFields(colorFields)
+          .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
+      }
+
+      // ========== /perfil reiniciar ==========
+      else if (subcommand === 'reiniciar') {
+        const tipo = interaction.options.getString('tipo');
+
+        try {
+          profileCustomization.resetCustomization(userData, tipo);
+          dataManager.dataModified.users = true;
+
+          const tipoNames = {
+            background: 'fondo',
+            color: 'color',
+            title: 'título',
+            bio: 'biografía',
+            all: 'toda la personalización'
+          };
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} Personalización Reiniciada`)
+            .setDescription(`Se ha reiniciado: **${tipoNames[tipo]}**`)
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.INFO} ${interaction.user.tag} reinició: ${tipo}`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+    }
+
+    // ==================== SISTEMA DE EVENTOS ====================
+
+    // /evento - Sistema de eventos y competencias
+    else if (commandName === 'evento') {
+      const subcommand = interaction.options.getSubcommand();
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+      const { getEventManager, EVENT_STATUS } = require('./utils/eventManager');
+      const eventManager = getEventManager();
+
+      // ========== /evento crear ==========
+      if (subcommand === 'crear') {
+        // Check admin permissions
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} Solo los administradores pueden crear eventos.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const tipo = interaction.options.getString('tipo');
+        const nombre = interaction.options.getString('nombre');
+        const descripcion = interaction.options.getString('descripcion');
+        const duracion = interaction.options.getInteger('duracion');
+        const maxParticipantes = interaction.options.getInteger('max_participantes');
+
+        try {
+          const options = {};
+          if (duracion) {
+            options.endTime = Date.now() + (duracion * 60 * 60 * 1000);
+          }
+          if (maxParticipantes) {
+            options.maxParticipantes = maxParticipantes;
+          }
+
+          const event = eventManager.createEvent(guildId, tipo, nombre, descripcion, userId, options);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${event.emoji} Evento Creado`)
+            .setDescription(
+              `**${event.name}**\n` +
+              `${event.description}\n\n` +
+              `**ID:** \`${event.id}\`\n` +
+              `**Tipo:** ${event.emoji} ${tipo.replace('_', ' ')}\n` +
+              `**Estado:** ⏳ Pendiente\n` +
+              `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+              `**Participantes:** 0/${event.maxParticipants}\n\n` +
+              `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+            )
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} creó evento: ${event.name}`);
+        } catch (error) {
+          console.error('Error creando evento:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} Error al crear evento: ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento unirse ==========
+      else if (subcommand === 'unirse') {
+        const eventoQuery = interaction.options.getString('evento');
+
+        try {
+          // Find event by name or ID
+          let event = eventManager.getEvent(eventoQuery);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+          }
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          eventManager.joinEvent(event.id, userId);
+
+          // Initialize koku tracking for koku rush events
+          if (event.type === 'koku_rush') {
+            const userData = dataManager.getUser(userId, guildId);
+            event.metadata.startingKoku[userId] = userData.koku || 0;
+            eventManager.saveEvents();
+          }
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} ¡Te has unido al evento!`)
+            .setDescription(
+              `**${event.name}**\n` +
+              `${event.description}\n\n` +
+              `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n` +
+              `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}`
+            )
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} se unió al evento: ${event.name}`);
+        } catch (error) {
+          console.error('Error uniéndose a evento:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento salir ==========
+      else if (subcommand === 'salir') {
+        const eventoQuery = interaction.options.getString('evento');
+
+        try {
+          let event = eventManager.getEvent(eventoQuery);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+          }
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          eventManager.leaveEvent(event.id, userId);
+
+          await interaction.reply({
+            content: `${EMOJIS.SUCCESS} Has salido del evento **${event.name}**.`,
+            flags: MessageFlags.Ephemeral
+          });
+
+          console.log(`${EMOJIS.VOICE} ${interaction.user.tag} salió del evento: ${event.name}`);
+        } catch (error) {
+          console.error('Error saliendo de evento:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento ver ==========
+      else if (subcommand === 'ver') {
+        const eventoQuery = interaction.options.getString('evento');
+
+        try {
+          if (!eventoQuery) {
+            // Show all active events
+            const activeEvents = eventManager.getActiveEvents(guildId);
+
+            if (activeEvents.length === 0) {
+              return interaction.reply({
+                content: `${EMOJIS.INFO} No hay eventos activos en este servidor.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            const embed = new EmbedBuilder()
+              .setColor(COLORS.PRIMARY)
+              .setTitle('📋 Eventos Activos')
+              .setDescription(
+                activeEvents.map(e =>
+                  `${e.emoji} **${e.name}**\n` +
+                  `ID: \`${e.id}\`\n` +
+                  `Participantes: ${e.participants.length}/${e.maxParticipants}\n` +
+                  `Finaliza: <t:${Math.floor(e.endTime / 1000)}:R>`
+                ).join('\n\n')
+              )
+              .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+              .setTimestamp();
+
+            return interaction.reply({ embeds: [embed] });
+          }
+
+          // Show specific event
+          let event = eventManager.getEvent(eventoQuery);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+          }
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const statusEmoji = {
+            pending: '⏳',
+            active: '▶️',
+            completed: '✅',
+            cancelled: '🚫'
+          }[event.status];
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle(`${event.emoji} ${event.name}`)
+            .setDescription(event.description)
+            .addFields(
+              { name: '🆔 ID', value: `\`${event.id}\``, inline: true },
+              { name: '📊 Estado', value: `${statusEmoji} ${event.status}`, inline: true },
+              { name: '👥 Participantes', value: `${event.participants.length}/${event.maxParticipants}`, inline: true },
+              { name: '⏰ Inicio', value: `<t:${Math.floor(event.startTime / 1000)}:F>`, inline: true },
+              { name: '🏁 Finaliza', value: `<t:${Math.floor(event.endTime / 1000)}:R>`, inline: true },
+              { name: '👤 Creador', value: `<@${event.creatorId}>`, inline: true }
+            )
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          // Add prizes if any
+          if (event.prizes && Object.keys(event.prizes).length > 0) {
+            const prizeText = Object.entries(event.prizes)
+              .slice(0, 3)
+              .map(([rank, prize]) => {
+                const medal = rank === '1' ? '🥇' : rank === '2' ? '🥈' : '🥉';
+                let text = `${medal} **Puesto ${rank}:** ${prize.koku || 0} ${EMOJIS.KOKU}`;
+                if (prize.title) text += ` + Título: "${prize.title}"`;
+                return text;
+              })
+              .join('\n');
+
+            embed.addFields({ name: '🏆 Premios', value: prizeText, inline: false });
+          }
+
+          await interaction.reply({ embeds: [embed] });
+        } catch (error) {
+          console.error('Error viendo evento:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento clasificacion ==========
+      else if (subcommand === 'clasificacion') {
+        const eventoQuery = interaction.options.getString('evento');
+
+        try {
+          let event = eventManager.getEvent(eventoQuery);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+          }
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const leaderboard = eventManager.getLeaderboard(event.id, 10);
+
+          if (leaderboard.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.INFO} Aún no hay puntuaciones registradas para este evento.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const leaderboardText = await Promise.all(leaderboard.map(async (entry, index) => {
+            const user = await client.users.fetch(entry.userId).catch(() => null);
+            const username = user ? user.username : 'Usuario desconocido';
+            const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
+            return `${medal} **${username}** - ${entry.score} puntos`;
+          }));
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle(`🏆 Clasificación: ${event.name}`)
+            .setDescription(leaderboardText.join('\n'))
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+        } catch (error) {
+          console.error('Error viendo clasificación:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento iniciar ==========
+      else if (subcommand === 'iniciar') {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} Solo los administradores pueden iniciar eventos.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const eventoQuery = interaction.options.getString('evento');
+
+        try {
+          let event = eventManager.getEvent(eventoQuery);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+          }
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          eventManager.startEvent(event.id);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${event.emoji} ¡Evento Iniciado!`)
+            .setDescription(
+              `**${event.name}** ha comenzado.\n\n` +
+              `**Participantes:** ${event.participants.length}\n` +
+              `**Finaliza:** <t:${Math.floor(event.endTime / 1000)}:R>`
+            )
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} inició evento: ${event.name}`);
+        } catch (error) {
+          console.error('Error iniciando evento:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento finalizar ==========
+      else if (subcommand === 'finalizar') {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} Solo los administradores pueden finalizar eventos.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const eventoQuery = interaction.options.getString('evento');
+
+        try {
+          let event = eventManager.getEvent(eventoQuery);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+          }
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          await interaction.deferReply();
+
+          eventManager.endEvent(event.id);
+          const winners = eventManager.awardPrizes(event.id, dataManager);
+
+          const winnersText = await Promise.all(winners.map(async w => {
+            const user = await client.users.fetch(w.userId).catch(() => null);
+            const username = user ? user.username : 'Usuario desconocido';
+            const medal = w.rank === 1 ? '🥇' : w.rank === 2 ? '🥈' : '🥉';
+            let text = `${medal} **${username}** - ${w.score} puntos\n`;
+            text += `   Recompensa: ${w.prize.koku || 0} ${EMOJIS.KOKU}`;
+            if (w.prize.title) text += ` + "${w.prize.title}"`;
+            return text;
+          }));
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${event.emoji} ¡Evento Finalizado!`)
+            .setDescription(`**${event.name}** ha concluido.\n\n**🏆 Ganadores:**\n\n${winnersText.join('\n\n')}`)
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.editReply({ embeds: [embed] });
+
+          // Notify winners via DM
+          for (const winner of winners) {
+            try {
+              const user = await client.users.fetch(winner.userId);
+              await user.send(
+                `${event.emoji} **¡Felicidades!**\n\n` +
+                `Has quedado en el **puesto ${winner.rank}** en el evento **${event.name}**.\n\n` +
+                `**Recompensa:**\n` +
+                `• ${winner.prize.koku || 0} ${EMOJIS.KOKU}\n` +
+                (winner.prize.title ? `• Título: "${winner.prize.title}"\n` : '') +
+                `\n¡Bien hecho, guerrero!`
+              );
+            } catch (e) {
+              // Ignore DM failures
+            }
+          }
+
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} finalizó evento: ${event.name}`);
+        } catch (error) {
+          console.error('Error finalizando evento:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento cancelar ==========
+      else if (subcommand === 'cancelar') {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} Solo los administradores pueden cancelar eventos.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const eventoQuery = interaction.options.getString('evento');
+
+        try {
+          let event = eventManager.getEvent(eventoQuery);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+          }
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          eventManager.cancelEvent(event.id);
+
+          await interaction.reply({
+            content: `${EMOJIS.SUCCESS} El evento **${event.name}** ha sido cancelado.`,
+            flags: MessageFlags.Ephemeral
+          });
+
+          console.log(`${EMOJIS.ERROR} ${interaction.user.tag} canceló evento: ${event.name}`);
+        } catch (error) {
+          console.error('Error cancelando evento:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento lista ==========
+      else if (subcommand === 'lista') {
+        const estadoFilter = interaction.options.getString('estado');
+
+        try {
+          const events = eventManager.getGuildEvents(guildId, estadoFilter);
+
+          if (events.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.INFO} No se encontraron eventos${estadoFilter ? ` con estado "${estadoFilter}"` : ''}.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const statusEmojis = {
+            pending: '⏳',
+            active: '▶️',
+            completed: '✅',
+            cancelled: '🚫'
+          };
+
+          const eventsList = events.map(e =>
+            `${e.emoji} **${e.name}**\n` +
+            `ID: \`${e.id}\` | ${statusEmojis[e.status]} ${e.status}\n` +
+            `Participantes: ${e.participants.length}/${e.maxParticipants}`
+          ).join('\n\n');
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('📋 Lista de Eventos')
+            .setDescription(eventsList)
+            .setFooter({ text: `Total: ${events.length} eventos` })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+        } catch (error) {
+          console.error('Error listando eventos:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento enviar ==========
+      else if (subcommand === 'enviar') {
+        const eventoId = interaction.options.getString('evento');
+        const imagenUrl = interaction.options.getString('imagen_url');
+        const descripcionBuild = interaction.options.getString('descripcion') || 'Sin descripción';
+
+        try {
+          const event = eventManager.getEvent(eventoId);
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento con ID "${eventoId}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          eventManager.submitBuildingEntry(eventoId, userId, imagenUrl, descripcionBuild);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} ¡Construcción Enviada!`)
+            .setDescription(
+              `Tu construcción ha sido registrada para **${event.name}**.\n\n` +
+              `**Descripción:** ${descripcionBuild}`
+            )
+            .setImage(imagenUrl)
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} envió construcción al evento: ${event.name}`);
+        } catch (error) {
+          console.error('Error enviando construcción:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento votar ==========
+      else if (subcommand === 'votar') {
+        const eventoId = interaction.options.getString('evento');
+        const targetUser = interaction.options.getUser('usuario');
+
+        try {
+          const event = eventManager.getEvent(eventoId);
+
+          if (!event) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No se encontró el evento con ID "${eventoId}".`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          eventManager.voteBuildingEntry(eventoId, userId, targetUser.id);
+
+          await interaction.reply({
+            content: `${EMOJIS.SUCCESS} Has votado por la construcción de **${targetUser.username}**.`,
+            flags: MessageFlags.Ephemeral
+          });
+
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} votó por ${targetUser.tag} en: ${event.name}`);
+        } catch (error) {
+          console.error('Error votando:', error.message);
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
     }
 
     // ==================== FASE 7: SISTEMA DE TRADUCCIÓN ====================

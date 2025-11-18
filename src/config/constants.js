@@ -604,6 +604,21 @@ CONSTANTS.validateClanTag = function(tag) {
   return { valid: true, reason: '' };
 };
 
+// ==================== SISTEMA DE LOGROS ====================
+CONSTANTS.ACHIEVEMENTS = {
+  // Límites
+  MAX_ACHIEVEMENTS: 100,              // Máximo de logros en el sistema
+
+  // Notificaciones
+  NOTIFY_DM: true,                    // Enviar notificación por DM
+  NOTIFY_CHANNEL: true,               // Enviar anuncio en canal de logros
+  ANNOUNCE_LEGENDARY: true,           // Anunciar logros legendarios públicamente
+
+  // Visualización
+  ACHIEVEMENTS_PER_PAGE: 10,          // Logros mostrados por página
+  SHOW_LOCKED_PROGRESS: true,         // Mostrar progreso en logros bloqueados
+};
+
 // Freeze para prevenir modificaciones accidentales
 Object.freeze(CONSTANTS.HONOR);
 Object.freeze(CONSTANTS.ECONOMY);
@@ -620,5 +635,6 @@ Object.freeze(CONSTANTS.TRANSLATION);
 Object.freeze(CONSTANTS.WISDOM_QUOTES);
 Object.freeze(CONSTANTS.SHOP);
 Object.freeze(CONSTANTS.MUSIC);
+Object.freeze(CONSTANTS.ACHIEVEMENTS);
 
 module.exports = CONSTANTS;
