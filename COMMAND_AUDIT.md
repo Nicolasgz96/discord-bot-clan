@@ -141,23 +141,23 @@
 
 ---
 
-### 🏆 LOGROS Y EVENTOS (achievementsChannel)
+### 🏆 LOGROS Y EVENTOS
 
 | Comando | Definido | Implementado | Canal | Estado |
 |---------|----------|--------------|-------|--------|
 | `/logros` | ✅ | ✅ | Cualquiera | ✅ OK |
 | `/achievements` | ✅ | ✅ | Cualquiera | ✅ OK (alias) |
 | `/medallas` | ✅ | ✅ | Cualquiera | ✅ OK (alias) |
-| `/evento` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento crear` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento lista` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento participar` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento salir` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento info` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento participantes` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento finalizar` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento votar` | ✅ | ✅ | achievementsChannel | ✅ OK |
-| - `/evento clasificacion` | ✅ | ✅ | achievementsChannel | ✅ OK |
+| `/evento` | ✅ | ✅ | **achievementsChannel** | ✅ OK ⚠️ **RESTRINGIDO** |
+| - `/evento crear` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
+| - `/evento lista` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
+| - `/evento participar` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
+| - `/evento salir` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
+| - `/evento info` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
+| - `/evento participantes` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
+| - `/evento finalizar` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
+| - `/evento votar` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
+| - `/evento clasificacion` | ✅ | ✅ | **achievementsChannel** | ✅ OK |
 
 ---
 
@@ -230,6 +230,23 @@
 
 ### Comandos con Restricciones de Canal
 
+#### 🏆 Logros y Eventos (achievementsChannel) - 🏆👹salón-de-honor👹🏆
+- **Requiere:** `achievementsChannel` configurado y habilitado
+- **Restricción:** `/evento` y todos sus subcomandos SOLO funcionan en el salón de honor
+- **Comandos Restringidos:**
+  - `/evento crear` - Crear nuevo evento (Admin only)
+  - `/evento lista` - Ver eventos activos
+  - `/evento participar` - Unirse a un evento
+  - `/evento salir` - Salir de un evento
+  - `/evento info` - Ver información de un evento
+  - `/evento participantes` - Ver participantes de un evento
+  - `/evento finalizar` - Finalizar un evento (Admin only)
+  - `/evento votar` - Votar en un evento
+  - `/evento clasificacion` - Ver clasificación de un evento
+- **Total:** 1 comando base + 9 subcomandos = 9 comandos
+- **Comandos Universales:**
+  - `/logros`, `/achievements`, `/medallas` - Funcionan en CUALQUIER canal
+
 #### 🎵 Música (musicChannel)
 - **Requiere:** `musicChannel` configurado y habilitado
 - **Restricción:** Solo funcionan en el canal de música
@@ -279,6 +296,62 @@ Estos comandos funcionan en **CUALQUIER CANAL**:
 4. **✅ Mantenimiento de canales**
    - Verificar que todos los canales en config.json existen
    - Actualizar channel IDs si se recrean canales
+
+---
+
+## 🏆 RESUMEN: ¿QUÉ COMANDOS VAN EN EL SALÓN DE HONOR?
+
+### Canal: 🏆👹salón-de-honor👹🏆 (achievementsChannel)
+
+**ID del Canal:** `1440375233147047987`
+
+#### ✅ Comandos que DEBEN usarse aquí:
+
+```
+/evento crear <nombre> <tipo> <duracion>
+/evento lista
+/evento participar <evento>
+/evento salir <evento>
+/evento info <evento>
+/evento participantes <evento>
+/evento finalizar <evento>
+/evento votar <evento> <opcion>
+/evento clasificacion <evento>
+```
+
+**Total:** 9 subcomandos de `/evento`
+
+#### ℹ️ Comandos que TAMBIÉN funcionan aquí (pero en cualquier canal):
+
+```
+/logros
+/achievements (alias)
+/medallas (alias)
+```
+
+---
+
+## 📊 DISTRIBUCIÓN COMPLETA POR CANALES
+
+| Canal | Emoji | Comandos Exclusivos | Comandos Universales Disponibles |
+|-------|-------|---------------------|-----------------------------------|
+| 🏆 **Salón de Honor** | 🏆👹 | `/evento` (9 subcomandos) | `/logros`, + 14 universales |
+| ⛩️ **Dojo** | ⛩️👹 | Honor (3) + Economía (7) + Clanes (8) = 18 | + 15 universales |
+| 🎵 **Gagakudō** | 🎋 | Música (33 comandos con aliases) | + 15 universales |
+| 🏪 **Tienda** | 🏪 | `/tienda` (3 subcomandos) | `/cosmetics` + 14 universales |
+| ⚔️ **Combate** | ⚔️ | `/duelo`, `/sabiduria`, `/fortuna` (3) | + 15 universales |
+| 🌐 **Cualquier Canal** | - | - | 15 comandos universales |
+
+**Comandos Universales (funcionan en TODOS los canales):**
+- Ayuda: `/help`, `/testwelcome`
+- Moderación: `/borrarmsg`, `/deshacerborrado`
+- Voz/TTS: `/hablar`, `/join`, `/salir`
+- Personalización: `/personalizar` (7 subcomandos)
+- Logros: `/logros`, `/achievements`, `/medallas`
+- Utilidades: `/traducir`
+- Perfil: `/perfil`
+- Cosméticos: `/cosmetics`
+- Ayuda Música: `/ayudamusica`
 
 ---
 

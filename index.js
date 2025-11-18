@@ -1453,9 +1453,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   const { commandName } = interaction;
 
+  // Comandos de eventos/logros que requieren estar en el canal de logros
+  const achievementsCommands = ['evento'];
+
+  // Verificar si el comando de eventos debe ejecutarse en el canal de logros
+  if (achievementsCommands.includes(commandName)) {
+    if (config.achievementsChannel && config.achievementsChannel.enabled && config.achievementsChannel.channelId) {
+      if (interaction.channel.id !== config.achievementsChannel.channelId) {
+        const achievementsChannel = interaction.guild.channels.cache.get(config.achievementsChannel.channelId);
+        const channelName = achievementsChannel ? achievementsChannel.name : 'el canal de logros';
+        const channelMention = achievementsChannel ? `<#${config.achievementsChannel.channelId}>` : 'el canal de logros';
+
+        return interaction.reply({
+          content: `❌ Los comandos de eventos solo pueden usarse en ${channelMention} (**${channelName}**).`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    }
+    // Si es un comando de eventos y pasó la verificación, salir aquí para evitar la verificación del canal de comandos
+    // (continuará con el switch más abajo)
+  }
+
   // Comandos de música que requieren estar en el canal de música
   const musicCommands = ['tocar', 'play', 'pausar', 'pause', 'reanudar', 'resume', 'siguiente', 'skip', 'detener', 'stop', 'cola', 'queue', 'ahora', 'sonando', 'nowplaying', 'np', 'limpiar', 'clear', 'saltar', 'jump', 'remover', 'remove', 'volumen', 'volume', 'buscar', 'search', 'mezclar', 'shuffle', 'repetir', 'loop', 'playlist', 'ayudamusica', 'helpmusic'];
-  
+
   // Verificar si el comando de música debe ejecutarse en el canal de música
   if (musicCommands.includes(commandName)) {
     if (config.musicChannel && config.musicChannel.enabled && config.musicChannel.channelId) {
@@ -1463,7 +1484,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const musicChannel = interaction.guild.channels.cache.get(config.musicChannel.channelId);
         const channelName = musicChannel ? musicChannel.name : 'el canal de música';
         const channelMention = musicChannel ? `<#${config.musicChannel.channelId}>` : 'el canal de música';
-        
+
         return interaction.reply({
           content: `❌ Los comandos de música solo pueden usarse en ${channelMention} (**${channelName}**).`,
           flags: MessageFlags.Ephemeral
@@ -1473,19 +1494,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // Si es un comando de música y pasó la verificación, salir aquí para evitar la verificación del canal de comandos
     // (continuará con el switch más abajo)
   }
-  
+
   // Comandos que NO requieren estar en el canal de comandos
   const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas'];
-  
+
   // Verificar si el comando debe ejecutarse en un canal específico
-  // (excluir comandos de música ya que tienen su propia verificación)
+  // (excluir comandos de música y achievements ya que tienen su propia verificación)
   if (config.commandsChannel && config.commandsChannel.enabled && config.commandsChannel.channelId) {
-    if (!excludedCommands.includes(commandName) && !musicCommands.includes(commandName)) {
+    if (!excludedCommands.includes(commandName) && !musicCommands.includes(commandName) && !achievementsCommands.includes(commandName)) {
       if (interaction.channel.id !== config.commandsChannel.channelId) {
         const commandsChannel = interaction.guild.channels.cache.get(config.commandsChannel.channelId);
         const channelName = commandsChannel ? commandsChannel.name : 'el canal de comandos';
         const channelMention = commandsChannel ? `<#${config.commandsChannel.channelId}>` : 'el canal de comandos';
-        
+
         return interaction.reply({
           content: `❌ Este comando solo puede usarse en ${channelMention} (**${channelName}**).`,
           flags: MessageFlags.Ephemeral
