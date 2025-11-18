@@ -36,7 +36,7 @@ const MESSAGES = {
     NEW_MEMBER: (member) => `${EMOJIS.CASTLE} Un nuevo cazador de demonios entra al dojo. ¡Bienvenido, ${member}!`,
     ROLE_ASSIGNED: `${EMOJIS.KATANA} Se te ha otorgado el rango de **Ronin**. Gana honor para ascender.`,
     WELCOME_CARD_TITLE: 'Bienvenido al Dojo',
-    WELCOME_CARD_SUBTITLE: (serverName) => `a ${serverName}`,
+    WELCOME_CARD_SUBTITLE: (serverName) => `${serverName}`,
   },
 
   // Honor System
