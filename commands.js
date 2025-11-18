@@ -125,8 +125,8 @@ const commands = [
     .addUserOption(option =>
       option
         .setName('oponente')
-        .setDescription('El guerrero que deseas desafiar')
-        .setRequired(true)
+        .setDescription('El guerrero que deseas desafiar (opcional, muestra dropdown si no se especifica)')
+        .setRequired(false)
     )
     .addIntegerOption(option =>
       option

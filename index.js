@@ -4248,18 +4248,225 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const combatChannel = interaction.guild.channels.cache.get(config.combatChannel.channelId);
           const channelName = combatChannel ? combatChannel.name : 'el canal de combate';
           const channelMention = combatChannel ? `<#${config.combatChannel.channelId}>` : 'el canal de combate';
-          
+
           return interaction.reply({
             content: `❌ Los comandos de combate solo pueden usarse en ${channelMention} (**${channelName}**).`,
             flags: MessageFlags.Ephemeral
           });
         }
       }
-      
+
       const opponent = interaction.options.getUser('oponente');
-      const bet = interaction.options.getInteger('apuesta') || CONSTANTS.DUELS.MIN_BET;
       const userId = interaction.user.id;
       const guildId = interaction.guild.id;
+
+      // Si no se proporcionó oponente, mostrar dropdown con usuarios online
+      if (!opponent) {
+        // Obtener miembros online del servidor (excluyendo bots y el usuario actual)
+        const guild = interaction.guild;
+        await guild.members.fetch(); // Asegurarse de tener todos los miembros
+
+        const onlineMembers = guild.members.cache.filter(member =>
+          !member.user.bot &&
+          member.id !== userId &&
+          member.presence?.status &&
+          ['online', 'idle', 'dnd'].includes(member.presence.status)
+        );
+
+        if (onlineMembers.size === 0) {
+          return interaction.reply({
+            content: '❌ No hay guerreros online disponibles para desafiar.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Crear dropdown con usuarios online
+        const userOptions = [];
+        for (const [, member] of onlineMembers) {
+          const memberData = dataManager.getUser(member.id, guildId);
+          const statusEmoji = member.presence?.status === 'online' ? '🟢' : (member.presence?.status === 'idle' ? '🟡' : '🔴');
+
+          userOptions.push({
+            label: member.displayName.substring(0, 100),
+            description: `${statusEmoji} Honor: ${memberData.honor || 0}`.substring(0, 100),
+            value: member.id,
+            emoji: EMOJIS.MEMBER
+          });
+
+          if (userOptions.length >= 25) break; // Discord limit
+        }
+
+        if (userOptions.length === 0) {
+          return interaction.reply({
+            content: '❌ No se pudieron cargar los usuarios online.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId('select_duel_opponent')
+          .setPlaceholder('Selecciona tu oponente')
+          .addOptions(userOptions);
+
+        const row = new ActionRowBuilder().addComponents(selectMenu);
+
+        await interaction.reply({
+          content: `${EMOJIS.DUEL} Selecciona el guerrero que deseas desafiar:`,
+          components: [row],
+          flags: MessageFlags.Ephemeral
+        });
+
+        // Collector para el dropdown
+        const selectCollector = interaction.channel.createMessageComponentCollector({
+          filter: (i) => i.user.id === userId && i.customId === 'select_duel_opponent',
+          time: 60000,
+          max: 1
+        });
+
+        selectCollector.on('collect', async (selectInteraction) => {
+          const selectedUserId = selectInteraction.values[0];
+          const selectedUser = await client.users.fetch(selectedUserId).catch(() => null);
+
+          if (!selectedUser) {
+            return selectInteraction.update({ content: '❌ No se pudo cargar el usuario seleccionado.', components: [] });
+          }
+
+          // Pedir la apuesta
+          await selectInteraction.update({
+            content: `${EMOJIS.DUEL} Has seleccionado a **${selectedUser.username}**.\n\n` +
+              `⚔️ ¿Cuánto honor deseas apostar? (${CONSTANTS.DUELS.MIN_BET}-${CONSTANTS.DUELS.MAX_BET})\n` +
+              `💡 Responde con un número en los próximos 30 segundos, o se usará la apuesta mínima (${CONSTANTS.DUELS.MIN_BET}).`,
+            components: []
+          });
+
+          // Collector para mensaje de apuesta
+          const messageCollector = interaction.channel.createMessageCollector({
+            filter: (msg) => msg.author.id === userId && !isNaN(msg.content),
+            time: 30000,
+            max: 1
+          });
+
+          const processDuel = async (betAmount) => {
+            // Validar apuesta
+            if (betAmount < CONSTANTS.DUELS.MIN_BET || betAmount > CONSTANTS.DUELS.MAX_BET) {
+              return interaction.followUp({
+                content: MESSAGES.DUEL.INVALID_BET(CONSTANTS.DUELS.MIN_BET, CONSTANTS.DUELS.MAX_BET),
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Verificar cooldown
+            if (dataManager.hasCooldown(userId, 'duelo')) {
+              const timeLeft = dataManager.getCooldownTime(userId, 'duelo');
+              return interaction.followUp({
+                content: MESSAGES.ERRORS.COOLDOWN(timeLeft),
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Verificar honor suficiente del retador
+            const userData = dataManager.getUser(userId, guildId);
+            if (userData.honor < betAmount) {
+              return interaction.followUp({
+                content: MESSAGES.DUEL.INSUFFICIENT_HONOR(betAmount),
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Verificar honor suficiente del oponente
+            const opponentData = dataManager.getUser(selectedUser.id, guildId);
+            if (opponentData.honor < betAmount) {
+              const opponentMember = await interaction.guild.members.fetch(selectedUser.id).catch(() => null);
+              const opponentDisplayName = opponentMember?.displayName || selectedUser.username;
+              return interaction.followUp({
+                content: MESSAGES.DUEL.OPPONENT_INSUFFICIENT_HONOR(opponentDisplayName),
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Establecer cooldown
+            dataManager.setCooldown(userId, 'duelo', CONSTANTS.DUELS.COOLDOWN);
+
+            // Obtener displayNames
+            const challengerDisplayName = await fetchDisplayName(interaction.guild, userId);
+            const opponentDisplayName = await fetchDisplayName(interaction.guild, selectedUser.id);
+
+            // Mensaje público
+            await interaction.followUp({
+              content: `${selectedUser}, ${MESSAGES.DUEL.CHALLENGE_RECEIVED(challengerDisplayName, betAmount)}`
+            });
+
+            // Botones para el oponente
+            const acceptButton = new ButtonBuilder()
+              .setCustomId('accept_duel_dropdown')
+              .setLabel('⚔️ Aceptar')
+              .setStyle(ButtonStyle.Success);
+
+            const declineButton = new ButtonBuilder()
+              .setCustomId('decline_duel_dropdown')
+              .setLabel('❌ Rechazar')
+              .setStyle(ButtonStyle.Danger);
+
+            const opponentRow = new ActionRowBuilder().addComponents(acceptButton, declineButton);
+
+            // Enviar DM al oponente
+            try {
+              await selectedUser.send({
+                content: `${EMOJIS.DUEL} **${challengerDisplayName}** te ha desafiado a un duelo de honor.\n${EMOJIS.HONOR} Apuesta: **${betAmount} puntos de honor**\n\n${EMOJIS.KATANA} ¿Aceptas el desafío?`,
+                components: [opponentRow]
+              });
+            } catch (error) {
+              return interaction.followUp({
+                content: `❌ No se pudo enviar un mensaje privado a ${selectedUser}. Por favor, habilita los mensajes directos para recibir la invitación al duelo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Enviar DM al retador
+            try {
+              const cancelButton = new ButtonBuilder()
+                .setCustomId('cancel_duel_dropdown')
+                .setLabel('🚫 Cancelar')
+                .setStyle(ButtonStyle.Secondary);
+
+              const challengerRow = new ActionRowBuilder().addComponents(cancelButton);
+
+              await interaction.user.send({
+                content: `${EMOJIS.DUEL} Has desafiado a **${opponentDisplayName}** a un duelo de honor.\n${EMOJIS.HONOR} Apuesta: **${betAmount} puntos de honor**\n\nEsperando respuesta del oponente...`,
+                components: [challengerRow]
+              });
+            } catch (error) {
+              console.warn(`No se pudo enviar DM a ${interaction.user.tag} para el duelo`);
+            }
+
+            console.log(`${EMOJIS.DUEL} ${interaction.user.tag} desafió a ${selectedUser.tag} a un duelo (apuesta: ${betAmount})`);
+          };
+
+          messageCollector.on('collect', async (msg) => {
+            const betAmount = parseInt(msg.content);
+            await msg.delete().catch(() => {}); // Limpiar mensaje de apuesta
+            await processDuel(betAmount);
+          });
+
+          messageCollector.on('end', async (collected, reason) => {
+            if (reason === 'time' && collected.size === 0) {
+              // Usar apuesta mínima si no respondió
+              await processDuel(CONSTANTS.DUELS.MIN_BET);
+            }
+          });
+        });
+
+        selectCollector.on('end', (collected, reason) => {
+          if (reason === 'time' && collected.size === 0) {
+            interaction.editReply({ content: '⏱️ Selección expirada.', components: [] }).catch(() => {});
+          }
+        });
+
+        return; // Exit early since we're using dropdown
+      }
+
+      // Si se proporcionó oponente, usar el flujo existente
+      const bet = interaction.options.getInteger('apuesta') || CONSTANTS.DUELS.MIN_BET;
 
       // Validaciones básicas
       if (opponent.id === userId) {
