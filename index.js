@@ -175,8 +175,85 @@ client.on(Events.MessageCreate, async (message) => {
           dataManager.updateClanStats(userData.clanId);
         }
 
+        // Track night messages (2-6 AM) for Night Owl achievement
+        const hour = new Date().getHours();
+        if (hour >= 2 && hour < 6) {
+          if (!userData.stats) userData.stats = {};
+          userData.stats.nightMessages = (userData.stats.nightMessages || 0) + 1;
+        }
+
+        // Track midnight messages (exactly 12 AM) for hidden achievement
+        if (hour === 0) {
+          if (!userData.stats) userData.stats = {};
+          userData.stats.midnightMessages = (userData.stats.midnightMessages || 0) + 1;
+        }
+
         // Marcar datos como modificados
         dataManager.dataModified.users = true;
+
+        // Check for new achievements
+        const achievementManager = require('./utils/achievementManager');
+        const newAchievements = achievementManager.checkAchievements(userId, guildId, userData);
+
+        // Notify user of new achievements
+        if (newAchievements.length > 0) {
+          for (const achievement of newAchievements) {
+            const tierInfo = achievementManager.TIER_INFO[achievement.tier];
+
+            // Send DM notification
+            if (CONSTANTS.ACHIEVEMENTS.NOTIFY_DM) {
+              try {
+                const user = await client.users.fetch(userId);
+                await user.send(
+                  `🏆 **¡Nuevo Logro Desbloqueado!**\n\n` +
+                  `${achievement.emoji} **${achievement.name}** ${tierInfo.emoji} *(${tierInfo.name})*\n` +
+                  `*${achievement.description}*\n\n` +
+                  `**Recompensa:** ${achievement.reward?.koku || 0} ${EMOJIS.KOKU}` +
+                  (achievement.reward?.title ? ` + Título: **"${achievement.reward.title}"**` : '') +
+                  `\n\nUsa \`/logros\` para ver todos tus logros.`
+                );
+              } catch (e) {
+                // Ignore DM failures
+              }
+            }
+
+            // Send channel notification
+            if (CONSTANTS.ACHIEVEMENTS.NOTIFY_CHANNEL && config.achievementsChannel?.enabled) {
+              try {
+                const achievementsChannel = client.channels.cache.get(config.achievementsChannel.channelId);
+                if (achievementsChannel) {
+                  // Only announce legendary/hidden achievements publicly, or all if configured
+                  const shouldAnnounce = CONSTANTS.ACHIEVEMENTS.ANNOUNCE_LEGENDARY
+                    ? (achievement.tier === 'legendary' || achievement.tier === 'platinum' || achievement.category === 'hidden')
+                    : true;
+
+                  if (shouldAnnounce) {
+                    const embed = new EmbedBuilder()
+                      .setColor(tierInfo.color)
+                      .setTitle(`${achievement.emoji} ¡Logro Desbloqueado! ${tierInfo.emoji}`)
+                      .setDescription(
+                        `<@${userId}> ha desbloqueado:\n\n` +
+                        `**${achievement.name}**\n` +
+                        `*${achievement.description}*`
+                      )
+                      .addFields({
+                        name: 'Recompensa',
+                        value: `${achievement.reward?.koku || 0} ${EMOJIS.KOKU}` +
+                               (achievement.reward?.title ? ` + Título: **"${achievement.reward.title}"**` : ''),
+                        inline: true
+                      })
+                      .setFooter({ text: `Tier: ${tierInfo.name}` })
+                      .setTimestamp();
+
+                    await achievementsChannel.send({ embeds: [embed] });
+                  }
+                }
+              } catch (e) {
+                console.error('Error enviando notificación de logro al canal:', e.message);
+              }
+            }
+          }
+        }
 
         // Establecer cooldown de 1 minuto
         dataManager.setCooldown(userId, 'honor_message', CONSTANTS.COOLDOWNS.HONOR_MESSAGE);
@@ -4283,6 +4360,127 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.reply({ embeds: [embed] });
       console.log(`${EMOJIS.SCROLL} ${interaction.user.tag} consultó perfil de ${targetUser.tag}`);
+    }
+
+    // ==================== SISTEMA DE LOGROS ====================
+
+    // /logros, /achievements, /medallas - Mostrar logros del usuario
+    else if (commandName === 'logros' || commandName === 'achievements' || commandName === 'medallas') {
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+
+      await interaction.deferReply();
+
+      const achievementManager = require('./utils/achievementManager');
+      const { unlocked, locked, stats } = achievementManager.getUserAchievements(userId, guildId);
+      const userData = dataManager.getUser(userId, guildId);
+
+      // Create main embed
+      const embed = new EmbedBuilder()
+        .setColor(COLORS.PRIMARY)
+        .setAuthor({
+          name: `${interaction.user.username} - Sistema de Logros`,
+          iconURL: interaction.user.displayAvatarURL()
+        })
+        .setDescription(
+          `${EMOJIS.HONOR} **Progreso Total:** ${stats.total}/${stats.totalPossible} logros desbloqueados (${stats.completion}%)\n` +
+          `${EMOJIS.KOKU} **Koku Ganado por Logros:** ${unlocked.reduce((sum, a) => sum + (a.reward?.koku || 0), 0)} koku\n\n`
+        )
+        .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+        .setTimestamp();
+
+      // Add latest achievement
+      if (stats.latestUnlock) {
+        const unlockedDate = new Date(stats.latestUnlock.unlockedAt);
+        const tierInfo = achievementManager.TIER_INFO[stats.latestUnlock.tier];
+        embed.addFields({
+          name: `🎉 Último Logro Desbloqueado`,
+          value: `${stats.latestUnlock.emoji} **${stats.latestUnlock.name}** ${tierInfo.emoji}\n` +
+                 `*${stats.latestUnlock.description}*\n` +
+                 `📅 ${unlockedDate.toLocaleDateString('es-ES')}`,
+          inline: false
+        });
+      }
+
+      // Group unlocked achievements by category
+      const categoriesShown = new Set();
+      for (const [category, achievements] of Object.entries(stats.byCategory)) {
+        if (achievements.length > 0) {
+          const categoryEmoji = achievementManager.CATEGORY_EMOJIS[category];
+          const categoryName = {
+            social: 'Social',
+            honor: 'Honor',
+            economy: 'Economía',
+            clan: 'Clan',
+            music: 'Música',
+            special: 'Especial',
+            hidden: 'Secreto'
+          }[category] || category;
+
+          const achList = achievements
+            .sort((a, b) => (b.unlockedAt || 0) - (a.unlockedAt || 0))
+            .slice(0, 5) // Show max 5 per category
+            .map(a => {
+              const tierInfo = achievementManager.TIER_INFO[a.tier];
+              return `${a.emoji} **${a.name}** ${tierInfo.emoji}`;
+            })
+            .join('\n');
+
+          embed.addFields({
+            name: `${categoryEmoji} ${categoryName} (${achievements.length})`,
+            value: achList,
+            inline: true
+          });
+          categoriesShown.add(category);
+        }
+      }
+
+      // Show some locked achievements (next goals)
+      const nextGoals = locked
+        .filter(a => !a.hidden)
+        .slice(0, 3)
+        .map(a => {
+          const tierInfo = achievementManager.TIER_INFO[a.tier];
+          let progress = '';
+
+          // Show progress for some achievement types
+          if (a.requirement.type === 'messages') {
+            const current = userData.stats?.messagesCount || 0;
+            progress = ` (${current}/${a.requirement.count})`;
+          } else if (a.requirement.type === 'voiceMinutes') {
+            const current = userData.stats?.voiceMinutes || 0;
+            progress = ` (${current}/${a.requirement.count} min)`;
+          } else if (a.requirement.type === 'honor') {
+            const current = userData.honor || 0;
+            progress = ` (${current}/${a.requirement.count})`;
+          } else if (a.requirement.type === 'koku') {
+            const current = userData.koku || 0;
+            progress = ` (${current}/${a.requirement.count})`;
+          }
+
+          return `${a.emoji} **${a.name}** ${tierInfo.emoji}${progress}\n*${a.description}*`;
+        })
+        .join('\n\n');
+
+      if (nextGoals) {
+        embed.addFields({
+          name: '🎯 Próximos Objetivos',
+          value: nextGoals,
+          inline: false
+        });
+      }
+
+      // Add titles if user has any
+      if (userData.titles && userData.titles.length > 0) {
+        embed.addFields({
+          name: '👑 Títulos Desbloqueados',
+          value: userData.titles.map(t => `• ${t}`).join('\n'),
+          inline: false
+        });
+      }
+
+      await interaction.editReply({ embeds: [embed] });
+      console.log(`${EMOJIS.HONOR} ${interaction.user.tag} consultó sus logros (${stats.total}/${stats.totalPossible})`);
     }
 
     // ==================== FASE 7: SISTEMA DE TRADUCCIÓN ====================

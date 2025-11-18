@@ -32,8 +32,11 @@
   "musicChannel": {
     "enabled": true,
     "channelId": "1439256046899040256"
-  }
-  ,
+  },
+  "achievementsChannel": {
+    "enabled": true,
+    "channelId": "1440375233147047987"
+  },
   "purge": {
     "enabled": true,
     "channelIds": [
