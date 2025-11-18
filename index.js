@@ -1539,10 +1539,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const combatChannel = config.combatChannel && config.combatChannel.enabled && config.combatChannel.channelId
         ? interaction.guild.channels.cache.get(config.combatChannel.channelId)
         : null;
+      const musicChannel = config.musicChannel && config.musicChannel.enabled && config.musicChannel.channelId
+        ? interaction.guild.channels.cache.get(config.musicChannel.channelId)
+        : null;
+      const achievementsChannel = config.achievementsChannel && config.achievementsChannel.enabled && config.achievementsChannel.channelId
+        ? interaction.guild.channels.cache.get(config.achievementsChannel.channelId)
+        : null;
 
       const commandsChannelName = commandsChannel ? `**${commandsChannel.name}**` : 'Cualquier canal';
       const shopChannelName = shopChannel ? `**${shopChannel.name}**` : 'Cualquier canal';
       const combatChannelName = combatChannel ? `**${combatChannel.name}**` : 'Cualquier canal';
+      const musicChannelName = musicChannel ? `**${musicChannel.name}**` : 'Cualquier canal';
+      const achievementsChannelName = achievementsChannel ? `**${achievementsChannel.name}**` : 'Cualquier canal';
 
       // Dividir en múltiples embeds para evitar el límite de 25 campos
       const embed1 = new EmbedBuilder()
@@ -1603,14 +1611,57 @@ client.on(Events.InteractionCreate, async (interaction) => {
             value: `⚔️ \`/duelo @usuario\` - Desafía a un duelo de honor\n📜 \`/sabiduria\` - Citas de maestros samurai\n🎴 \`/fortuna\` - Omikuji (fortuna diaria)\n👤 \`/perfil [@usuario]\` - Ver perfil completo de guerrero\n📍 *${combatChannelName}*`,
             inline: false
           },
+          // ========== PERSONALIZACIÓN ==========
+          {
+            name: `${EMOJIS.PAINT} __PERSONALIZACIÓN__`,
+            value: `🖼️ \`/personalizar fondo\` - Cambiar fondo de perfil\n🎨 \`/personalizar color\` - Cambiar color de embeds\n👑 \`/personalizar titulo\` - Cambiar título visible\n📝 \`/personalizar bio\` - Cambiar biografía\n📍 *Cualquier canal*`,
+            inline: false
+          },
+          {
+            name: `${EMOJIS.PAINT} __PERSONALIZACIÓN (CONT.)__`,
+            value: `👁️ \`/personalizar ver\` - Ver personalización actual\n🎨 \`/personalizar colores\` - Ver colores disponibles\n🔄 \`/personalizar reiniciar\` - Reiniciar personalización\n📍 *Cualquier canal*`,
+            inline: false
+          },
+          // ========== LOGROS Y EVENTOS ==========
+          {
+            name: `${EMOJIS.TROPHY} __LOGROS Y EVENTOS__`,
+            value: `🏆 \`/logros\` - Ver tus logros desbloqueados\n🎯 \`/evento crear\` - Crear nuevo evento\n🎯 \`/evento lista\` - Ver eventos activos\n🎯 \`/evento participar\` - Unirse a evento\n📍 *${achievementsChannelName}*`,
+            inline: false
+          },
+          {
+            name: `${EMOJIS.TROPHY} __LOGROS Y EVENTOS (CONT.)__`,
+            value: `🎯 \`/evento salir\` - Salir de evento\n🎯 \`/evento info\` - Info de un evento\n🎯 \`/evento participantes\` - Ver participantes\n🎯 \`/evento finalizar\` - Finalizar evento\n📍 *${achievementsChannelName}*`,
+            inline: false
+          },
+          // ========== MÚSICA ==========
+          {
+            name: `${EMOJIS.SHAKUHACHI} __MÚSICA (DOJO DEL SONIDO)__`,
+            value: `▶️ \`/tocar <canción>\` - Reproducir música\n⏸️ \`/pausar\` - Pausar reproducción\n▶️ \`/reanudar\` - Reanudar reproducción\n⏭️ \`/siguiente\` - Saltar canción actual\n⏹️ \`/detener\` - Detener reproducción\n📍 *${musicChannelName}*`,
+            inline: false
+          },
+          {
+            name: `${EMOJIS.SHAKUHACHI} __MÚSICA (CONT.)__`,
+            value: `📚 \`/cola\` - Ver cola de reproducción\n🎼 \`/ahora\` - Ver canción actual\n🗑️ \`/limpiar\` - Limpiar cola\n⏩ \`/saltar <posición>\` - Saltar a canción\n📍 *${musicChannelName}*`,
+            inline: false
+          },
+          {
+            name: `${EMOJIS.SHAKUHACHI} __MÚSICA (CONT. 2)__`,
+            value: `❌ \`/remover <posición>\` - Remover canción\n🔊 \`/volumen <0-100>\` - Ajustar volumen\n🔍 \`/buscar <canción>\` - Buscar canciones\n🔀 \`/mezclar\` - Mezclar cola\n📍 *${musicChannelName}*`,
+            inline: false
+          },
+          {
+            name: `${EMOJIS.SHAKUHACHI} __MÚSICA (CONT. 3)__`,
+            value: `🔁 \`/repetir\` - Repetir cola/canción\n📚 \`/playlist <nombre>\` - Cargar playlist\n❓ \`/ayudamusica\` - Ayuda de comandos de música\n📍 *${musicChannelName}*`,
+            inline: false
+          },
           // ========== UTILIDADES ==========
           {
-            name: `${EMOJIS.TRANSLATION} __UTILIDADES__`,
+            name: `${EMOJIS.GLOBE} __UTILIDADES__`,
             value: '🌐 `/traducir` - Traduce entre ES/JP/EN\n*Máx: 500 caracteres*\n📍 *Cualquier canal*',
             inline: false
           }
         )
-        .setFooter({ text: `Demon Hunter Bot v1.5 • ${EMOJIS.FIRE} Total: 23 comandos slash` })
+        .setFooter({ text: `Demon Hunter Bot v2.0 • ${EMOJIS.FIRE} Total: 50+ comandos slash` })
         .setTimestamp();
 
       await interaction.reply({ embeds: [embed1] });
