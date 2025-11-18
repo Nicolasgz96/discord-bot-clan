@@ -7725,9 +7725,205 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // /tienda comprar
       else if (subcommand === 'comprar') {
+        const itemId = interaction.options.getString('item');
+
+        // Si no se proporcionó item, mostrar dropdown
+        if (!itemId) {
+          const allItems = Object.values(CONSTANTS.SHOP.ITEMS);
+
+          if (allItems.length === 0) {
+            return interaction.reply({ content: '❌ No hay items disponibles en la tienda.', flags: MessageFlags.Ephemeral });
+          }
+
+          // Crear dropdown con todos los items
+          const itemOptions = allItems.map(item => {
+            // Limpiar emojis del nombre
+            const cleanName = item.name
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')
+              .trim();
+
+            const cleanDesc = item.description
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')
+              .trim();
+
+            return {
+              label: `${cleanName} - ${item.price.toLocaleString()} koku`.substring(0, 100),
+              description: cleanDesc.substring(0, 100),
+              value: item.id,
+              emoji: item.category === 'boosts' ? '⚡' : (item.category === 'cosmetics' ? '🎨' : '⭐')
+            };
+          }).slice(0, 25); // Discord limit: 25 options
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('select_item_to_buy')
+            .setPlaceholder('Selecciona un item para comprar')
+            .addOptions(itemOptions);
+
+          const row = new ActionRowBuilder().addComponents(selectMenu);
+
+          await interaction.reply({
+            content: `${EMOJIS.SHOP} Selecciona el item que deseas comprar:\n💰 Tu balance: **${userData.koku.toLocaleString()}** koku`,
+            components: [row],
+            flags: MessageFlags.Ephemeral
+          });
+
+          // Collector para el dropdown
+          const selectCollector = interaction.channel.createMessageComponentCollector({
+            filter: (i) => i.user.id === userId && i.customId === 'select_item_to_buy',
+            time: 60000,
+            max: 1
+          });
+
+          selectCollector.on('collect', async (selectInteraction) => {
+            const selectedItemId = selectInteraction.values[0];
+            const selectedItem = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === selectedItemId);
+
+            if (!selectedItem) {
+              return selectInteraction.update({ content: '❌ Item no encontrado.', components: [] });
+            }
+
+            // Obtener datos actualizados del usuario
+            const currentUserData = dataManager.getUser(userId, guildId);
+
+            // Verificar si puede comprar
+            if (currentUserData.koku < selectedItem.price) {
+              return selectInteraction.update({
+                content: `❌ No tienes suficiente koku. Necesitas **${selectedItem.price.toLocaleString()}** koku, pero solo tienes **${currentUserData.koku.toLocaleString()}** koku.`,
+                components: []
+              });
+            }
+
+            // Verificar capacidad del inventario
+            if (selectedItem.type === 'consumable' || selectedItem.type === 'permanent') {
+              if (!currentUserData.inventory) currentUserData.inventory = [];
+              const currentSize = currentUserData.inventory.length;
+              const maxCapacity = CONSTANTS.getInventoryCapacity(currentUserData);
+
+              if (currentSize >= maxCapacity) {
+                return selectInteraction.update({
+                  content: `❌ Tu inventario está lleno (**${currentSize}/${maxCapacity}** slots).\n` +
+                    `💡 Compra **🎒 Expansión de Inventario** para aumentar tu capacidad en +10 slots.`,
+                  components: []
+                });
+              }
+            }
+
+            // Verificar si ya tiene el item permanente
+            if (selectedItem.type === 'permanent') {
+              const hasItem = currentUserData.inventory?.some(i => i.itemId === selectedItem.id);
+              if (hasItem) {
+                return selectInteraction.update({ content: '❌ Ya posees este item permanente.', components: [] });
+              }
+            }
+
+            // Mostrar confirmación
+            const confirmButton = new ButtonBuilder()
+              .setCustomId('confirm_buy_dropdown')
+              .setLabel('Confirmar Compra')
+              .setStyle(ButtonStyle.Success);
+
+            const cancelButton = new ButtonBuilder()
+              .setCustomId('cancel_buy_dropdown')
+              .setLabel('Cancelar')
+              .setStyle(ButtonStyle.Secondary);
+
+            const confirmRow = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+            await selectInteraction.update({
+              content: `${EMOJIS.SHOP} ¿Confirmas la compra de **${selectedItem.name}** por **${selectedItem.price.toLocaleString()}** koku?\n\n` +
+                `${selectedItem.description}\n\n` +
+                `💰 Koku actual: **${currentUserData.koku.toLocaleString()}**\n` +
+                `💰 Koku después: **${(currentUserData.koku - selectedItem.price).toLocaleString()}**`,
+              components: [confirmRow]
+            });
+
+            // Collector para confirmación
+            const confirmCollector = interaction.channel.createMessageComponentCollector({
+              filter: (i) => i.user.id === userId && (i.customId === 'confirm_buy_dropdown' || i.customId === 'cancel_buy_dropdown'),
+              time: 30000,
+              max: 1
+            });
+
+            confirmCollector.on('collect', async (confirmInteraction) => {
+              if (confirmInteraction.customId === 'confirm_buy_dropdown') {
+                // Procesar compra
+                const finalUserData = dataManager.getUser(userId, guildId);
+
+                // Verificar koku nuevamente
+                if (finalUserData.koku < selectedItem.price) {
+                  return confirmInteraction.update({
+                    content: '❌ Ya no tienes suficiente koku para esta compra.',
+                    components: []
+                  });
+                }
+
+                // Inicializar inventario
+                if (!finalUserData.inventory) finalUserData.inventory = [];
+
+                // Procesar según tipo
+                finalUserData.koku -= selectedItem.price;
+                let message = '';
+
+                if (selectedItem.type === 'boost') {
+                  if (!finalUserData.activeBoosts) finalUserData.activeBoosts = [];
+                  const expiresAt = Date.now() + selectedItem.duration;
+                  finalUserData.activeBoosts.push({
+                    itemId: selectedItem.id,
+                    expiresAt: expiresAt,
+                    effect: selectedItem.effect
+                  });
+                  message = `✅ ¡Compra exitosa! Has activado **${selectedItem.name}** por ${selectedItem.duration / (60 * 60 * 1000)} horas.\n💰 Koku restante: **${finalUserData.koku.toLocaleString()}**`;
+                } else if (selectedItem.type === 'consumable') {
+                  const existing = finalUserData.inventory.find(inv => inv.itemId === selectedItem.id);
+                  if (existing) {
+                    existing.quantity = (existing.quantity || 1) + 1;
+                  } else {
+                    finalUserData.inventory.push({
+                      itemId: selectedItem.id,
+                      purchasedAt: Date.now(),
+                      quantity: 1
+                    });
+                  }
+                  message = `✅ ¡Compra exitosa! Has comprado **${selectedItem.name}**.\n💰 Koku restante: **${finalUserData.koku.toLocaleString()}**`;
+                } else if (selectedItem.type === 'permanent') {
+                  finalUserData.inventory.push({
+                    itemId: selectedItem.id,
+                    purchasedAt: Date.now()
+                  });
+                  message = `✅ ¡Compra exitosa! Has adquirido **${selectedItem.name}** permanentemente.\n💰 Koku restante: **${finalUserData.koku.toLocaleString()}**`;
+                }
+
+                await dataManager.saveUsers();
+                await confirmInteraction.update({ content: message, components: [] });
+                console.log(`🏪 ${interaction.user.tag} compró ${selectedItem.name} por ${selectedItem.price} koku`);
+              } else {
+                await confirmInteraction.update({ content: '❌ Compra cancelada.', components: [] });
+              }
+            });
+
+            confirmCollector.on('end', (collected, reason) => {
+              if (reason === 'time') {
+                selectInteraction.editReply({ content: '⏱️ Tiempo de confirmación expirado.', components: [] }).catch(() => {});
+              }
+            });
+          });
+
+          selectCollector.on('end', (collected, reason) => {
+            if (reason === 'time' && collected.size === 0) {
+              interaction.editReply({ content: '⏱️ Selección expirada.', components: [] }).catch(() => {});
+            }
+          });
+
+          return; // Exit early since we're using dropdown
+        }
+
+        // Si se proporcionó item, usar el flujo existente
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        const itemId = interaction.options.getString('item');
         const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === itemId);
 
         if (!item) {
