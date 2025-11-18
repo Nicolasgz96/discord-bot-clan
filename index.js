@@ -1475,7 +1475,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
   
   // Comandos que NO requieren estar en el canal de comandos
-  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic'];
+  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas'];
   
   // Verificar si el comando debe ejecutarse en un canal específico
   // (excluir comandos de música ya que tienen su propia verificación)
