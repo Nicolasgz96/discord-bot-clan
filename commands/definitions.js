@@ -710,12 +710,12 @@ const commands = [
     .addSubcommand(subcommand =>
       subcommand
         .setName('color')
-        .setDescription('🎨 Cambiar color de embeds')
+        .setDescription('🎨 Cambiar color de embeds (sin parámetro = menú interactivo)')
         .addStringOption(option =>
           option
             .setName('codigo')
-            .setDescription('Código hexadecimal (#FF5733) o nombre de preset')
-            .setRequired(true)
+            .setDescription('Código hexadecimal (#FF5733) o nombre de preset (opcional)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
