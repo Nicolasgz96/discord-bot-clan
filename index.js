@@ -1636,22 +1636,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // ========== MÚSICA ==========
           {
             name: `${EMOJIS.SHAKUHACHI} __MÚSICA (DOJO DEL SONIDO)__`,
-            value: `▶️ \`/tocar <canción>\` - Reproducir música\n⏸️ \`/pausar\` - Pausar reproducción\n▶️ \`/reanudar\` - Reanudar reproducción\n⏭️ \`/siguiente\` - Saltar canción actual\n⏹️ \`/detener\` - Detener reproducción\n📍 *${musicChannelName}*`,
-            inline: false
-          },
-          {
-            name: `${EMOJIS.SHAKUHACHI} __MÚSICA (CONT.)__`,
-            value: `📚 \`/cola\` - Ver cola de reproducción\n🎼 \`/ahora\` - Ver canción actual\n🗑️ \`/limpiar\` - Limpiar cola\n⏩ \`/saltar <posición>\` - Saltar a canción\n📍 *${musicChannelName}*`,
-            inline: false
-          },
-          {
-            name: `${EMOJIS.SHAKUHACHI} __MÚSICA (CONT. 2)__`,
-            value: `❌ \`/remover <posición>\` - Remover canción\n🔊 \`/volumen <0-100>\` - Ajustar volumen\n🔍 \`/buscar <canción>\` - Buscar canciones\n🔀 \`/mezclar\` - Mezclar cola\n📍 *${musicChannelName}*`,
-            inline: false
-          },
-          {
-            name: `${EMOJIS.SHAKUHACHI} __MÚSICA (CONT. 3)__`,
-            value: `🔁 \`/repetir\` - Repetir cola/canción\n📚 \`/playlist <nombre>\` - Cargar playlist\n❓ \`/ayudamusica\` - Ayuda de comandos de música\n📍 *${musicChannelName}*`,
+            value: `🎋 18 comandos de música disponibles\n❓ \`/ayudamusica\` - Ver todos los comandos de música\n📍 *${musicChannelName}*`,
             inline: false
           },
           // ========== UTILIDADES ==========
