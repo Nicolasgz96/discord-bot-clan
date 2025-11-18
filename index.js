@@ -4048,6 +4048,126 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({ content: MESSAGES.CLAN.ONLY_LEADER, flags: MessageFlags.Ephemeral });
         }
 
+        // Si no se proporcionó usuario, mostrar dropdown
+        if (!targetUser) {
+          const clanMembers = clan.members.filter(memberId => memberId !== userId);
+
+          if (clanMembers.length === 0) {
+            return interaction.reply({ content: '❌ No hay otros miembros en tu clan para expulsar.', flags: MessageFlags.Ephemeral });
+          }
+
+          // Crear dropdown con miembros del clan
+          const memberOptions = [];
+          for (const memberId of clanMembers) {
+            try {
+              const member = await client.users.fetch(memberId).catch(() => null);
+              if (member) {
+                const memberData = dataManager.getUser(memberId, guildId);
+                memberOptions.push({
+                  label: member.username.substring(0, 100),
+                  description: `Honor: ${memberData.honor || 0}`.substring(0, 100),
+                  value: memberId,
+                  emoji: EMOJIS.MEMBER
+                });
+              }
+            } catch (e) {
+              // Skip members that can't be fetched
+            }
+          }
+
+          if (memberOptions.length === 0) {
+            return interaction.reply({ content: '❌ No se pudieron cargar los miembros del clan.', flags: MessageFlags.Ephemeral });
+          }
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('select_member_to_kick')
+            .setPlaceholder('Selecciona un miembro para expulsar')
+            .addOptions(memberOptions.slice(0, 25)); // Discord limit: 25 options
+
+          const row = new ActionRowBuilder().addComponents(selectMenu);
+
+          await interaction.reply({
+            content: `${EMOJIS.CLAN} Selecciona el miembro que deseas expulsar de **${clan.name}**:`,
+            components: [row],
+            flags: MessageFlags.Ephemeral
+          });
+
+          // Collector para el dropdown
+          const selectCollector = interaction.channel.createMessageComponentCollector({
+            filter: (i) => i.user.id === userId && i.customId === 'select_member_to_kick',
+            time: 60000,
+            max: 1
+          });
+
+          selectCollector.on('collect', async (selectInteraction) => {
+            const selectedUserId = selectInteraction.values[0];
+            const selectedUser = await client.users.fetch(selectedUserId).catch(() => null);
+
+            if (!selectedUser) {
+              return selectInteraction.update({ content: '❌ No se pudo cargar el usuario seleccionado.', components: [] });
+            }
+
+            // Mostrar confirmación
+            const confirmButton = new ButtonBuilder()
+              .setCustomId('confirm_kick_dropdown')
+              .setLabel('Confirmar Expulsión')
+              .setStyle(ButtonStyle.Danger);
+
+            const cancelButton = new ButtonBuilder()
+              .setCustomId('cancel_kick_dropdown')
+              .setLabel('Cancelar')
+              .setStyle(ButtonStyle.Secondary);
+
+            const confirmRow = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+            await selectInteraction.update({
+              content: `${EMOJIS.WARNING} ¿Estás seguro de expulsar a **${selectedUser.tag}** del clan?`,
+              components: [confirmRow]
+            });
+
+            // Collector para confirmación
+            const confirmCollector = interaction.channel.createMessageComponentCollector({
+              filter: (i) => i.user.id === userId && (i.customId === 'confirm_kick_dropdown' || i.customId === 'cancel_kick_dropdown'),
+              time: 30000,
+              max: 1
+            });
+
+            confirmCollector.on('collect', async (confirmInteraction) => {
+              if (confirmInteraction.customId === 'confirm_kick_dropdown') {
+                const targetUserData = dataManager.getUser(selectedUserId, guildId);
+                targetUserData.clanId = null;
+                dataManager.removeClanMember(clan.clanId, selectedUserId);
+                dataManager.updateClanStats(clan.clanId);
+                await dataManager.saveUsers();
+
+                await confirmInteraction.update({
+                  content: `${EMOJIS.SUCCESS} **${selectedUser.tag}** ha sido expulsado del clan.`,
+                  components: []
+                });
+
+                console.log(`${EMOJIS.CLAN} ${interaction.user.tag} expulsó a ${selectedUser.tag} del clan ${clan.name}`);
+              } else {
+                await confirmInteraction.update({ content: '❌ Expulsión cancelada.', components: [] });
+              }
+            });
+
+            confirmCollector.on('end', (collected, reason) => {
+              if (reason === 'time') {
+                selectInteraction.editReply({ content: '⏱️ Tiempo de confirmación expirado.', components: [] }).catch(() => {});
+              }
+            });
+          });
+
+          selectCollector.on('end', (collected, reason) => {
+            if (reason === 'time' && collected.size === 0) {
+              interaction.editReply({ content: '⏱️ Selección expirada.', components: [] }).catch(() => {});
+            }
+          });
+
+          return; // Exit early since we're using dropdown
+        }
+
+        // Si se proporcionó usuario, usar el flujo existente
         // Verificar que no se esté expulsando a sí mismo
         if (targetUser.id === userId) {
           return interaction.reply({ content: MESSAGES.CLAN.CANNOT_KICK_SELF, flags: MessageFlags.Ephemeral });

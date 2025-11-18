@@ -253,8 +253,8 @@ const commands = [
         .addUserOption(option =>
           option
             .setName('usuario')
-            .setDescription('Usuario a expulsar')
-            .setRequired(true)
+            .setDescription('Usuario a expulsar (opcional, muestra dropdown si no se especifica)')
+            .setRequired(false)
         )
     ),
 
