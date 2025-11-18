@@ -4576,6 +4576,97 @@ client.on(Events.InteractionCreate, async (interaction) => {
       else if (subcommand === 'color') {
         const colorInput = interaction.options.getString('codigo');
 
+        // If no color input provided, show interactive menu
+        if (!colorInput) {
+          const presets = profileCustomization.getAllColorPresets();
+
+          // Create select menu options
+          const options = Object.entries(presets).map(([key, preset]) =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(preset.name)
+              .setDescription(`${preset.color}`)
+              .setValue(key)
+              .setEmoji('🎨')
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('color_select_menu')
+            .setPlaceholder('🎨 Selecciona un color para tu perfil')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(userData.customization?.embedColor || COLORS.PRIMARY)
+            .setTitle('🎨 Selector de Color de Perfil')
+            .setDescription(
+              'Selecciona un color del menú abajo para cambiar el color de tus embeds.\n\n' +
+              `**Color actual:** ${userData.customization?.embedColor || 'Por defecto (#00D4FF)'}\n\n` +
+              '💡 También puedes usar: `/personalizar color codigo:#FF5733` para código hex personalizado'
+            )
+            .setFooter({ text: 'El color cambiará la barra lateral de tus embeds' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for color selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'color_select_menu') {
+                const selectedPreset = i.values[0];
+                const preset = profileCustomization.getColorPreset(selectedPreset);
+
+                // Get fresh user data
+                const currentUserData = dataManager.getUser(userId, guildId);
+
+                profileCustomization.setCustomColor(currentUserData, preset.color);
+                dataManager.dataModified.users = true;
+
+                const confirmEmbed = new EmbedBuilder()
+                  .setColor(preset.color)
+                  .setTitle(`${EMOJIS.SUCCESS} Color Actualizado`)
+                  .setDescription(
+                    `Tu color ha sido cambiado a **${preset.name}**\n\n` +
+                    `**Código:** ${preset.color}\n\n` +
+                    `Este embed muestra tu nuevo color.`
+                  )
+                  .setFooter({ text: 'El color se aplicará a tus embeds de perfil' })
+                  .setTimestamp();
+
+                await i.update({ embeds: [confirmEmbed], components: [] });
+                console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} cambió su color a ${preset.color} (${preset.name})`);
+                collector.stop('completed');
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando selección de color:`, error);
+              await i.reply({
+                content: `${EMOJIS.ERROR} Hubo un error al cambiar tu color. Intenta de nuevo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de color expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
+        }
+
+        // If color input provided, process normally
         try {
           let hexColor = colorInput;
 
