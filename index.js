@@ -7924,7 +7924,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (cosmeticType === 'badge') return item.id.includes('badge');
             if (cosmeticType === 'color') return item.id.includes('color');
             return false;
-          });
+          })
+          // Eliminar duplicados por ID (por si hay bugs de compra duplicada)
+          .filter((item, index, self) =>
+            self.findIndex(i => i.id === item.id) === index
+          );
+
+        console.log(`🔍 DEBUG - Usuario ${interaction.user.tag} filtrando cosméticos:`, {
+          inventorySize: userData.inventory.length,
+          cosmeticType,
+          foundCosmetics: availableCosmetics.length,
+          cosmeticIds: availableCosmetics.map(c => c.id)
+        });
 
         if (availableCosmetics.length === 0) {
           return interaction.editReply(`❌ No tienes cosméticos de tipo **${cosmeticType}** en tu inventario.`);
@@ -7937,15 +7948,50 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setMinValues(1)
           .setMaxValues(1);
 
-        for (const cosmetic of availableCosmetics) {
-          const cleanName = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g, '').trim();
-          selectMenu.addOptions(
-            new StringSelectMenuOptionBuilder()
-              .setLabel(cleanName)
-              .setValue(cosmetic.id)
-              .setDescription(cosmetic.description)
-          );
+        // Emoji mapping para cada tipo
+        const typeEmojiForOptions = {
+          'title': '👑',
+          'badge': '🏅',
+          'color': '🎨'
+        };
+
+        try {
+          for (const cosmetic of availableCosmetics) {
+            // Limpiar nombre de TODOS los emojis usando regex más amplia
+            const cleanName = cosmetic.name
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '') // Emojis Unicode
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')   // Símbolos variados
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
+              .trim();
+
+            // Asegurar que el nombre no esté vacío
+            if (!cleanName || cleanName.length === 0) {
+              console.error(`❌ ERROR: Cosmético ${cosmetic.id} tiene nombre vacío después de limpiar emojis`);
+              continue;
+            }
+
+            // Truncar nombre y descripción a límites de Discord
+            const safeLabel = cleanName.substring(0, 100);
+            const safeDesc = cosmetic.description.substring(0, 100);
+
+            console.log(`  ✅ Agregando opción: "${safeLabel}" (ID: ${cosmetic.id})`);
+
+            selectMenu.addOptions(
+              new StringSelectMenuOptionBuilder()
+                .setLabel(safeLabel)
+                .setValue(cosmetic.id)
+                .setDescription(safeDesc)
+                .setEmoji(typeEmojiForOptions[cosmeticType]) // Emoji consistente por tipo
+            );
+          }
+        } catch (error) {
+          console.error(`❌ ERROR al crear menú de cosméticos:`, error);
+          return interaction.editReply({
+            content: `❌ Error al cargar tus cosméticos. Por favor contacta a un administrador.\n\n**Debug:** ${error.message}`
+          });
         }
+
+        console.log(`🎨 Usuario ${interaction.user.tag} tiene ${availableCosmetics.length} cosméticos de tipo ${cosmeticType}`);
 
         const row = new ActionRowBuilder().addComponents(selectMenu);
 
