@@ -4515,8 +4515,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     // ==================== PERSONALIZACIÓN DE PERFIL ====================
 
-    // /perfil - Sistema de personalización
-    else if (commandName === 'perfil') {
+    // /personalizar - Sistema de personalización
+    else if (commandName === 'personalizar') {
       const subcommand = interaction.options.getSubcommand();
       const userId = interaction.user.id;
       const guildId = interaction.guild.id;
@@ -4721,8 +4721,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setColor(COLORS.PRIMARY)
           .setTitle('🎨 Paleta de Colores')
           .setDescription(
-            'Usa `/perfil color codigo:<nombre>` para aplicar un preset.\n' +
-            'También puedes usar código hexadecimal: `/perfil color codigo:#FF5733`'
+            'Usa `/personalizar color codigo:<nombre>` para aplicar un preset.\n' +
+            'También puedes usar código hexadecimal: `/personalizar color codigo:#FF5733`'
           )
           .addFields(colorFields)
           .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
