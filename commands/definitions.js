@@ -694,7 +694,7 @@ const commands = [
 
   // ==================== PERSONALIZACIÓN DE PERFIL ====================
   new SlashCommandBuilder()
-    .setName('perfil')
+    .setName('personalizar')
     .setDescription('🎨 Sistema de personalización de perfil')
     .addSubcommand(subcommand =>
       subcommand
