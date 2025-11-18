@@ -4297,6 +4297,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const userData = dataManager.getUser(userId, guildId);
       const clan = userData.clanId ? dataManager.getClan(userData.clanId) : null;
 
+      // Load profile customization
+      const profileCustomization = require('./utils/profileCustomization');
+      const customization = userData.customization || {};
+
       // Información de fortuna
       let fortuneInfo = MESSAGES.PROFILE.NO_FORTUNE;
       if (userData.fortune && userData.fortune.type) {
@@ -4313,7 +4317,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Obtener displayName del servidor
       const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
-      const displayName = targetMember?.displayName || targetUser.username;
+      let displayName = targetMember?.displayName || targetUser.username;
+
+      // Apply custom title if set
+      if (customization.displayTitle) {
+        displayName = profileCustomization.getDisplayNameWithTitle(displayName, userData);
+      }
 
       // Obtener cosméticos activos
       const activeCosmetics = dataManager.getActiveCosmetics(userId, guildId);
@@ -4338,10 +4347,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       const embed = new EmbedBuilder()
-        .setColor(COLORS.PRIMARY)
+        .setColor(customization.embedColor || COLORS.PRIMARY)
         .setTitle(MESSAGES.PROFILE.TITLE(profileTitle))
-        .setThumbnail(targetUser.displayAvatarURL())
-        .addFields(
+        .setThumbnail(targetUser.displayAvatarURL());
+
+      // Add custom bio if set
+      if (customization.bio) {
+        embed.setDescription(`*"${customization.bio}"*\n`);
+      }
+
+      embed.addFields(
           {
             name: `${EMOJIS.HONOR} Honor`,
             value: `**${userData.honor}** puntos\n${getRankEmoji(userData.rank)} Rango: **${userData.rank}**`,
@@ -4387,6 +4402,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         )
         .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
         .setTimestamp();
+
+      // Add custom background image if set
+      if (customization.backgroundUrl) {
+        embed.setImage(customization.backgroundUrl);
+      }
 
       await interaction.reply({ embeds: [embed] });
       console.log(`${EMOJIS.SCROLL} ${interaction.user.tag} consultó perfil de ${targetUser.tag}`);
