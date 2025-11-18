@@ -678,6 +678,19 @@ const commands = [
   new SlashCommandBuilder()
     .setName('helpmusic')
     .setDescription('🎵 Alias de /ayudamusica - Muestra comandos de música'),
+
+  // ==================== SISTEMA DE LOGROS ====================
+  new SlashCommandBuilder()
+    .setName('logros')
+    .setDescription('🏆 Muestra tus logros y medallas de honor'),
+
+  new SlashCommandBuilder()
+    .setName('achievements')
+    .setDescription('🏆 Alias de /logros - Muestra tus logros'),
+
+  new SlashCommandBuilder()
+    .setName('medallas')
+    .setDescription('🏅 Ver tus medallas y progreso de logros'),
 ];
 
 module.exports = commands;
