@@ -4562,7 +4562,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: 'El fondo se mostrará en tu tarjeta de bienvenida y perfil' })
             .setTimestamp();
 
-          await interaction.reply({ embeds: [embed] });
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} cambió su fondo de perfil`);
         } catch (error) {
           return interaction.reply({
@@ -4599,7 +4599,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: 'El color se aplicará a tus embeds de perfil' })
             .setTimestamp();
 
-          await interaction.reply({ embeds: [embed] });
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} cambió su color a ${hexColor}`);
         } catch (error) {
           return interaction.reply({
@@ -4632,7 +4632,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
             .setTimestamp();
 
-          await interaction.reply({ embeds: [embed] });
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} estableció su título: ${title}`);
         } catch (error) {
           return interaction.reply({
@@ -4661,7 +4661,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: `${bio.length}/100 caracteres` })
             .setTimestamp();
 
-          await interaction.reply({ embeds: [embed] });
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} actualizó su biografía`);
         } catch (error) {
           return interaction.reply({
@@ -4723,7 +4723,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           embed.setImage(summary.backgroundUrl);
         }
 
-        await interaction.reply({ embeds: [embed] });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
         console.log(`${EMOJIS.INFO} ${interaction.user.tag} consultó su personalización`);
       }
 
@@ -4748,7 +4748,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
           .setTimestamp();
 
-        await interaction.reply({ embeds: [embed] });
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       }
 
       // ========== /perfil reiniciar ==========
@@ -4774,7 +4774,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
             .setTimestamp();
 
-          await interaction.reply({ embeds: [embed] });
+          await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
           console.log(`${EMOJIS.INFO} ${interaction.user.tag} reinició: ${tipo}`);
         } catch (error) {
           return interaction.reply({
