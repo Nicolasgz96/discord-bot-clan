@@ -5288,6 +5288,139 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const eventoQuery = interaction.options.getString('evento');
 
+        // If no event provided, show dropdown menu
+        if (!eventoQuery) {
+          const activeEvents = eventManager.getGuildEvents(guildId).filter(e =>
+            e.status === EVENT_STATUS.ACTIVE || e.status === EVENT_STATUS.PENDING
+          );
+
+          if (activeEvents.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay eventos activos para finalizar.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Create dropdown options
+          const options = activeEvents.map(event =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(event.name.substring(0, 100)) // Discord max 100 chars
+              .setDescription(`${event.emoji} ${event.participants.length} participantes - ${event.status === EVENT_STATUS.ACTIVE ? '▶️ Activo' : '⏳ Pendiente'}`.substring(0, 100))
+              .setValue(event.id)
+              .setEmoji(event.emoji)
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('event_finalize_select')
+            .setPlaceholder('🏁 Selecciona un evento para finalizar')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('🏁 Finalizar Evento')
+            .setDescription(
+              'Selecciona el evento que deseas finalizar del menú abajo.\n\n' +
+              `**Eventos disponibles:** ${activeEvents.length}\n\n` +
+              '⚠️ **Advertencia:** Al finalizar se otorgarán premios según el ranking actual.'
+            )
+            .setFooter({ text: 'También puedes usar: /evento finalizar evento:nombre' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for event selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'event_finalize_select') {
+                const eventId = i.values[0];
+                const event = eventManager.getEvent(eventId);
+
+                if (!event) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} Evento no encontrado.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                await i.deferUpdate();
+
+                // Finalize the event
+                eventManager.endEvent(event.id);
+                const winners = eventManager.awardPrizes(event.id, dataManager);
+
+                const winnersText = await Promise.all(winners.map(async w => {
+                  const user = await client.users.fetch(w.userId).catch(() => null);
+                  const username = user ? user.username : 'Usuario desconocido';
+                  const medal = w.rank === 1 ? '🥇' : w.rank === 2 ? '🥈' : '🥉';
+                  let text = `${medal} **${username}** - ${w.score} puntos\n`;
+                  text += `   Recompensa: ${w.prize.koku || 0} ${EMOJIS.KOKU}`;
+                  if (w.prize.title) text += ` + "${w.prize.title}"`;
+                  return text;
+                }));
+
+                const finalEmbed = new EmbedBuilder()
+                  .setColor(COLORS.SUCCESS)
+                  .setTitle(`${event.emoji} ¡Evento Finalizado!`)
+                  .setDescription(`**${event.name}** ha concluido.\n\n**🏆 Ganadores:**\n\n${winnersText.join('\n\n')}`)
+                  .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                  .setTimestamp();
+
+                await i.editReply({ embeds: [finalEmbed], components: [] });
+
+                // Notify winners via DM
+                for (const winner of winners) {
+                  try {
+                    const user = await client.users.fetch(winner.userId);
+                    await user.send(
+                      `${event.emoji} **¡Felicidades!**\n\n` +
+                      `Has quedado en el **puesto ${winner.rank}** en el evento **${event.name}**.\n\n` +
+                      `**Recompensa:**\n` +
+                      `• ${winner.prize.koku || 0} ${EMOJIS.KOKU}\n` +
+                      (winner.prize.title ? `• Título: "${winner.prize.title}"\n` : '') +
+                      `\n¡Bien hecho, guerrero!`
+                    );
+                  } catch (e) {
+                    // Ignore DM failures
+                  }
+                }
+
+                console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} finalizó evento: ${event.name}`);
+                collector.stop('completed');
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando finalización de evento:`, error);
+              await i.update({
+                content: `${EMOJIS.ERROR} Hubo un error al finalizar el evento. Intenta de nuevo.`,
+                embeds: [],
+                components: []
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de evento (finalizar) expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
+        }
+
+        // If event query provided, process normally
         try {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
@@ -5364,6 +5497,106 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const eventoQuery = interaction.options.getString('evento');
 
+        // If no event provided, show dropdown menu
+        if (!eventoQuery) {
+          const cancelableEvents = eventManager.getGuildEvents(guildId).filter(e =>
+            e.status !== EVENT_STATUS.COMPLETED && e.status !== EVENT_STATUS.CANCELLED
+          );
+
+          if (cancelableEvents.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay eventos disponibles para cancelar.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Create dropdown options
+          const options = cancelableEvents.map(event =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(event.name.substring(0, 100)) // Discord max 100 chars
+              .setDescription(`${event.emoji} ${event.participants.length} participantes - ${event.status === EVENT_STATUS.ACTIVE ? '▶️ Activo' : '⏳ Pendiente'}`.substring(0, 100))
+              .setValue(event.id)
+              .setEmoji(event.emoji)
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('event_cancel_select')
+            .setPlaceholder('🚫 Selecciona un evento para cancelar')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.ERROR)
+            .setTitle('🚫 Cancelar Evento')
+            .setDescription(
+              'Selecciona el evento que deseas cancelar del menú abajo.\n\n' +
+              `**Eventos disponibles:** ${cancelableEvents.length}\n\n` +
+              '⚠️ **Advertencia:** Al cancelar NO se otorgarán premios.'
+            )
+            .setFooter({ text: 'También puedes usar: /evento cancelar evento:nombre' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for event selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'event_cancel_select') {
+                const eventId = i.values[0];
+                const event = eventManager.getEvent(eventId);
+
+                if (!event) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} Evento no encontrado.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Cancel the event
+                eventManager.cancelEvent(event.id);
+
+                await i.update({
+                  content: `${EMOJIS.SUCCESS} El evento **${event.name}** ha sido cancelado.`,
+                  embeds: [],
+                  components: []
+                });
+
+                console.log(`${EMOJIS.ERROR} ${interaction.user.tag} canceló evento: ${event.name}`);
+                collector.stop('completed');
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando cancelación de evento:`, error);
+              await i.update({
+                content: `${EMOJIS.ERROR} ${error.message}`,
+                embeds: [],
+                components: []
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de evento (cancelar) expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
+        }
+
+        // If event query provided, process normally
         try {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
