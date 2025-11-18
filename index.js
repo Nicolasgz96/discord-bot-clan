@@ -143,8 +143,19 @@ client.on(Events.MessageCreate, async (message) => {
 
       // Verificar cooldown de honor por mensajes (1 minuto)
       if (!dataManager.hasCooldown(userId, 'honor_message')) {
+        // Calcular honor con bonus permanente si aplica
+        let honorToGrant = CONSTANTS.HONOR.PER_MESSAGE;
+
+        // Obtener datos del usuario para verificar items permanentes
+        const tempUserData = dataManager.getUser(userId, guildId);
+        const hasHonorBonus = tempUserData.inventory?.some(inv => inv.itemId === 'honor_bonus_permanent');
+
+        if (hasHonorBonus) {
+          honorToGrant = Math.floor(honorToGrant * 1.05); // +5% bonus
+        }
+
         // Ganar honor (koku only for real users, not the bot)
-        const userData = dataManager.addHonor(userId, guildId, CONSTANTS.HONOR.PER_MESSAGE);
+        const userData = dataManager.addHonor(userId, guildId, honorToGrant);
         if (userData.userId !== client.user.id && !userData.isBot) {
           userData.koku = (userData.koku || 0) + CONSTANTS.ECONOMY.PER_MESSAGE;
 
@@ -4037,6 +4048,126 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({ content: MESSAGES.CLAN.ONLY_LEADER, flags: MessageFlags.Ephemeral });
         }
 
+        // Si no se proporcionó usuario, mostrar dropdown
+        if (!targetUser) {
+          const clanMembers = clan.members.filter(memberId => memberId !== userId);
+
+          if (clanMembers.length === 0) {
+            return interaction.reply({ content: '❌ No hay otros miembros en tu clan para expulsar.', flags: MessageFlags.Ephemeral });
+          }
+
+          // Crear dropdown con miembros del clan
+          const memberOptions = [];
+          for (const memberId of clanMembers) {
+            try {
+              const member = await client.users.fetch(memberId).catch(() => null);
+              if (member) {
+                const memberData = dataManager.getUser(memberId, guildId);
+                memberOptions.push({
+                  label: member.username.substring(0, 100),
+                  description: `Honor: ${memberData.honor || 0}`.substring(0, 100),
+                  value: memberId,
+                  emoji: EMOJIS.MEMBER
+                });
+              }
+            } catch (e) {
+              // Skip members that can't be fetched
+            }
+          }
+
+          if (memberOptions.length === 0) {
+            return interaction.reply({ content: '❌ No se pudieron cargar los miembros del clan.', flags: MessageFlags.Ephemeral });
+          }
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('select_member_to_kick')
+            .setPlaceholder('Selecciona un miembro para expulsar')
+            .addOptions(memberOptions.slice(0, 25)); // Discord limit: 25 options
+
+          const row = new ActionRowBuilder().addComponents(selectMenu);
+
+          await interaction.reply({
+            content: `${EMOJIS.CLAN} Selecciona el miembro que deseas expulsar de **${clan.name}**:`,
+            components: [row],
+            flags: MessageFlags.Ephemeral
+          });
+
+          // Collector para el dropdown
+          const selectCollector = interaction.channel.createMessageComponentCollector({
+            filter: (i) => i.user.id === userId && i.customId === 'select_member_to_kick',
+            time: 60000,
+            max: 1
+          });
+
+          selectCollector.on('collect', async (selectInteraction) => {
+            const selectedUserId = selectInteraction.values[0];
+            const selectedUser = await client.users.fetch(selectedUserId).catch(() => null);
+
+            if (!selectedUser) {
+              return selectInteraction.update({ content: '❌ No se pudo cargar el usuario seleccionado.', components: [] });
+            }
+
+            // Mostrar confirmación
+            const confirmButton = new ButtonBuilder()
+              .setCustomId('confirm_kick_dropdown')
+              .setLabel('Confirmar Expulsión')
+              .setStyle(ButtonStyle.Danger);
+
+            const cancelButton = new ButtonBuilder()
+              .setCustomId('cancel_kick_dropdown')
+              .setLabel('Cancelar')
+              .setStyle(ButtonStyle.Secondary);
+
+            const confirmRow = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+            await selectInteraction.update({
+              content: `${EMOJIS.WARNING} ¿Estás seguro de expulsar a **${selectedUser.tag}** del clan?`,
+              components: [confirmRow]
+            });
+
+            // Collector para confirmación
+            const confirmCollector = interaction.channel.createMessageComponentCollector({
+              filter: (i) => i.user.id === userId && (i.customId === 'confirm_kick_dropdown' || i.customId === 'cancel_kick_dropdown'),
+              time: 30000,
+              max: 1
+            });
+
+            confirmCollector.on('collect', async (confirmInteraction) => {
+              if (confirmInteraction.customId === 'confirm_kick_dropdown') {
+                const targetUserData = dataManager.getUser(selectedUserId, guildId);
+                targetUserData.clanId = null;
+                dataManager.removeClanMember(clan.clanId, selectedUserId);
+                dataManager.updateClanStats(clan.clanId);
+                await dataManager.saveUsers();
+
+                await confirmInteraction.update({
+                  content: `${EMOJIS.SUCCESS} **${selectedUser.tag}** ha sido expulsado del clan.`,
+                  components: []
+                });
+
+                console.log(`${EMOJIS.CLAN} ${interaction.user.tag} expulsó a ${selectedUser.tag} del clan ${clan.name}`);
+              } else {
+                await confirmInteraction.update({ content: '❌ Expulsión cancelada.', components: [] });
+              }
+            });
+
+            confirmCollector.on('end', (collected, reason) => {
+              if (reason === 'time') {
+                selectInteraction.editReply({ content: '⏱️ Tiempo de confirmación expirado.', components: [] }).catch(() => {});
+              }
+            });
+          });
+
+          selectCollector.on('end', (collected, reason) => {
+            if (reason === 'time' && collected.size === 0) {
+              interaction.editReply({ content: '⏱️ Selección expirada.', components: [] }).catch(() => {});
+            }
+          });
+
+          return; // Exit early since we're using dropdown
+        }
+
+        // Si se proporcionó usuario, usar el flujo existente
         // Verificar que no se esté expulsando a sí mismo
         if (targetUser.id === userId) {
           return interaction.reply({ content: MESSAGES.CLAN.CANNOT_KICK_SELF, flags: MessageFlags.Ephemeral });
@@ -4117,18 +4248,225 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const combatChannel = interaction.guild.channels.cache.get(config.combatChannel.channelId);
           const channelName = combatChannel ? combatChannel.name : 'el canal de combate';
           const channelMention = combatChannel ? `<#${config.combatChannel.channelId}>` : 'el canal de combate';
-          
+
           return interaction.reply({
             content: `❌ Los comandos de combate solo pueden usarse en ${channelMention} (**${channelName}**).`,
             flags: MessageFlags.Ephemeral
           });
         }
       }
-      
+
       const opponent = interaction.options.getUser('oponente');
-      const bet = interaction.options.getInteger('apuesta') || CONSTANTS.DUELS.MIN_BET;
       const userId = interaction.user.id;
       const guildId = interaction.guild.id;
+
+      // Si no se proporcionó oponente, mostrar dropdown con usuarios online
+      if (!opponent) {
+        // Obtener miembros online del servidor (excluyendo bots y el usuario actual)
+        const guild = interaction.guild;
+        await guild.members.fetch(); // Asegurarse de tener todos los miembros
+
+        const onlineMembers = guild.members.cache.filter(member =>
+          !member.user.bot &&
+          member.id !== userId &&
+          member.presence?.status &&
+          ['online', 'idle', 'dnd'].includes(member.presence.status)
+        );
+
+        if (onlineMembers.size === 0) {
+          return interaction.reply({
+            content: '❌ No hay guerreros online disponibles para desafiar.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Crear dropdown con usuarios online
+        const userOptions = [];
+        for (const [, member] of onlineMembers) {
+          const memberData = dataManager.getUser(member.id, guildId);
+          const statusEmoji = member.presence?.status === 'online' ? '🟢' : (member.presence?.status === 'idle' ? '🟡' : '🔴');
+
+          userOptions.push({
+            label: member.displayName.substring(0, 100),
+            description: `${statusEmoji} Honor: ${memberData.honor || 0}`.substring(0, 100),
+            value: member.id,
+            emoji: EMOJIS.MEMBER
+          });
+
+          if (userOptions.length >= 25) break; // Discord limit
+        }
+
+        if (userOptions.length === 0) {
+          return interaction.reply({
+            content: '❌ No se pudieron cargar los usuarios online.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId('select_duel_opponent')
+          .setPlaceholder('Selecciona tu oponente')
+          .addOptions(userOptions);
+
+        const row = new ActionRowBuilder().addComponents(selectMenu);
+
+        await interaction.reply({
+          content: `${EMOJIS.DUEL} Selecciona el guerrero que deseas desafiar:`,
+          components: [row],
+          flags: MessageFlags.Ephemeral
+        });
+
+        // Collector para el dropdown
+        const selectCollector = interaction.channel.createMessageComponentCollector({
+          filter: (i) => i.user.id === userId && i.customId === 'select_duel_opponent',
+          time: 60000,
+          max: 1
+        });
+
+        selectCollector.on('collect', async (selectInteraction) => {
+          const selectedUserId = selectInteraction.values[0];
+          const selectedUser = await client.users.fetch(selectedUserId).catch(() => null);
+
+          if (!selectedUser) {
+            return selectInteraction.update({ content: '❌ No se pudo cargar el usuario seleccionado.', components: [] });
+          }
+
+          // Pedir la apuesta
+          await selectInteraction.update({
+            content: `${EMOJIS.DUEL} Has seleccionado a **${selectedUser.username}**.\n\n` +
+              `⚔️ ¿Cuánto honor deseas apostar? (${CONSTANTS.DUELS.MIN_BET}-${CONSTANTS.DUELS.MAX_BET})\n` +
+              `💡 Responde con un número en los próximos 30 segundos, o se usará la apuesta mínima (${CONSTANTS.DUELS.MIN_BET}).`,
+            components: []
+          });
+
+          // Collector para mensaje de apuesta
+          const messageCollector = interaction.channel.createMessageCollector({
+            filter: (msg) => msg.author.id === userId && !isNaN(msg.content),
+            time: 30000,
+            max: 1
+          });
+
+          const processDuel = async (betAmount) => {
+            // Validar apuesta
+            if (betAmount < CONSTANTS.DUELS.MIN_BET || betAmount > CONSTANTS.DUELS.MAX_BET) {
+              return interaction.followUp({
+                content: MESSAGES.DUEL.INVALID_BET(CONSTANTS.DUELS.MIN_BET, CONSTANTS.DUELS.MAX_BET),
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Verificar cooldown
+            if (dataManager.hasCooldown(userId, 'duelo')) {
+              const timeLeft = dataManager.getCooldownTime(userId, 'duelo');
+              return interaction.followUp({
+                content: MESSAGES.ERRORS.COOLDOWN(timeLeft),
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Verificar honor suficiente del retador
+            const userData = dataManager.getUser(userId, guildId);
+            if (userData.honor < betAmount) {
+              return interaction.followUp({
+                content: MESSAGES.DUEL.INSUFFICIENT_HONOR(betAmount),
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Verificar honor suficiente del oponente
+            const opponentData = dataManager.getUser(selectedUser.id, guildId);
+            if (opponentData.honor < betAmount) {
+              const opponentMember = await interaction.guild.members.fetch(selectedUser.id).catch(() => null);
+              const opponentDisplayName = opponentMember?.displayName || selectedUser.username;
+              return interaction.followUp({
+                content: MESSAGES.DUEL.OPPONENT_INSUFFICIENT_HONOR(opponentDisplayName),
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Establecer cooldown
+            dataManager.setCooldown(userId, 'duelo', CONSTANTS.DUELS.COOLDOWN);
+
+            // Obtener displayNames
+            const challengerDisplayName = await fetchDisplayName(interaction.guild, userId);
+            const opponentDisplayName = await fetchDisplayName(interaction.guild, selectedUser.id);
+
+            // Mensaje público
+            await interaction.followUp({
+              content: `${selectedUser}, ${MESSAGES.DUEL.CHALLENGE_RECEIVED(challengerDisplayName, betAmount)}`
+            });
+
+            // Botones para el oponente
+            const acceptButton = new ButtonBuilder()
+              .setCustomId('accept_duel_dropdown')
+              .setLabel('⚔️ Aceptar')
+              .setStyle(ButtonStyle.Success);
+
+            const declineButton = new ButtonBuilder()
+              .setCustomId('decline_duel_dropdown')
+              .setLabel('❌ Rechazar')
+              .setStyle(ButtonStyle.Danger);
+
+            const opponentRow = new ActionRowBuilder().addComponents(acceptButton, declineButton);
+
+            // Enviar DM al oponente
+            try {
+              await selectedUser.send({
+                content: `${EMOJIS.DUEL} **${challengerDisplayName}** te ha desafiado a un duelo de honor.\n${EMOJIS.HONOR} Apuesta: **${betAmount} puntos de honor**\n\n${EMOJIS.KATANA} ¿Aceptas el desafío?`,
+                components: [opponentRow]
+              });
+            } catch (error) {
+              return interaction.followUp({
+                content: `❌ No se pudo enviar un mensaje privado a ${selectedUser}. Por favor, habilita los mensajes directos para recibir la invitación al duelo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            // Enviar DM al retador
+            try {
+              const cancelButton = new ButtonBuilder()
+                .setCustomId('cancel_duel_dropdown')
+                .setLabel('🚫 Cancelar')
+                .setStyle(ButtonStyle.Secondary);
+
+              const challengerRow = new ActionRowBuilder().addComponents(cancelButton);
+
+              await interaction.user.send({
+                content: `${EMOJIS.DUEL} Has desafiado a **${opponentDisplayName}** a un duelo de honor.\n${EMOJIS.HONOR} Apuesta: **${betAmount} puntos de honor**\n\nEsperando respuesta del oponente...`,
+                components: [challengerRow]
+              });
+            } catch (error) {
+              console.warn(`No se pudo enviar DM a ${interaction.user.tag} para el duelo`);
+            }
+
+            console.log(`${EMOJIS.DUEL} ${interaction.user.tag} desafió a ${selectedUser.tag} a un duelo (apuesta: ${betAmount})`);
+          };
+
+          messageCollector.on('collect', async (msg) => {
+            const betAmount = parseInt(msg.content);
+            await msg.delete().catch(() => {}); // Limpiar mensaje de apuesta
+            await processDuel(betAmount);
+          });
+
+          messageCollector.on('end', async (collected, reason) => {
+            if (reason === 'time' && collected.size === 0) {
+              // Usar apuesta mínima si no respondió
+              await processDuel(CONSTANTS.DUELS.MIN_BET);
+            }
+          });
+        });
+
+        selectCollector.on('end', (collected, reason) => {
+          if (reason === 'time' && collected.size === 0) {
+            interaction.editReply({ content: '⏱️ Selección expirada.', components: [] }).catch(() => {});
+          }
+        });
+
+        return; // Exit early since we're using dropdown
+      }
+
+      // Si se proporcionó oponente, usar el flujo existente
+      const bet = interaction.options.getInteger('apuesta') || CONSTANTS.DUELS.MIN_BET;
 
       // Validaciones básicas
       if (opponent.id === userId) {
@@ -7064,6 +7402,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 currentUserData.inventory = [];
               }
 
+              // Verificar capacidad del inventario (solo para consumables y permanents)
+              if (item.type === 'consumable' || item.type === 'permanent') {
+                const currentSize = currentUserData.inventory.length;
+                const maxCapacity = CONSTANTS.getInventoryCapacity(currentUserData);
+
+                if (currentSize >= maxCapacity) {
+                  currentUserData.koku += item.price; // Reembolsar
+                  await dataManager.saveUsers();
+                  return i.reply({
+                    content: `❌ Tu inventario está lleno (**${currentSize}/${maxCapacity}** slots).\n` +
+                      `💡 Compra **🎒 Expansión de Inventario** para aumentar tu capacidad en +10 slots.`,
+                    flags: MessageFlags.Ephemeral
+                  });
+                }
+              }
+
               let purchaseMessage = '';
 
               if (item.type === 'boost') {
@@ -7578,9 +7932,205 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // /tienda comprar
       else if (subcommand === 'comprar') {
+        const itemId = interaction.options.getString('item');
+
+        // Si no se proporcionó item, mostrar dropdown
+        if (!itemId) {
+          const allItems = Object.values(CONSTANTS.SHOP.ITEMS);
+
+          if (allItems.length === 0) {
+            return interaction.reply({ content: '❌ No hay items disponibles en la tienda.', flags: MessageFlags.Ephemeral });
+          }
+
+          // Crear dropdown con todos los items
+          const itemOptions = allItems.map(item => {
+            // Limpiar emojis del nombre
+            const cleanName = item.name
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')
+              .trim();
+
+            const cleanDesc = item.description
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')
+              .trim();
+
+            return {
+              label: `${cleanName} - ${item.price.toLocaleString()} koku`.substring(0, 100),
+              description: cleanDesc.substring(0, 100),
+              value: item.id,
+              emoji: item.category === 'boosts' ? '⚡' : (item.category === 'cosmetics' ? '🎨' : '⭐')
+            };
+          }).slice(0, 25); // Discord limit: 25 options
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('select_item_to_buy')
+            .setPlaceholder('Selecciona un item para comprar')
+            .addOptions(itemOptions);
+
+          const row = new ActionRowBuilder().addComponents(selectMenu);
+
+          await interaction.reply({
+            content: `${EMOJIS.SHOP} Selecciona el item que deseas comprar:\n💰 Tu balance: **${userData.koku.toLocaleString()}** koku`,
+            components: [row],
+            flags: MessageFlags.Ephemeral
+          });
+
+          // Collector para el dropdown
+          const selectCollector = interaction.channel.createMessageComponentCollector({
+            filter: (i) => i.user.id === userId && i.customId === 'select_item_to_buy',
+            time: 60000,
+            max: 1
+          });
+
+          selectCollector.on('collect', async (selectInteraction) => {
+            const selectedItemId = selectInteraction.values[0];
+            const selectedItem = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === selectedItemId);
+
+            if (!selectedItem) {
+              return selectInteraction.update({ content: '❌ Item no encontrado.', components: [] });
+            }
+
+            // Obtener datos actualizados del usuario
+            const currentUserData = dataManager.getUser(userId, guildId);
+
+            // Verificar si puede comprar
+            if (currentUserData.koku < selectedItem.price) {
+              return selectInteraction.update({
+                content: `❌ No tienes suficiente koku. Necesitas **${selectedItem.price.toLocaleString()}** koku, pero solo tienes **${currentUserData.koku.toLocaleString()}** koku.`,
+                components: []
+              });
+            }
+
+            // Verificar capacidad del inventario
+            if (selectedItem.type === 'consumable' || selectedItem.type === 'permanent') {
+              if (!currentUserData.inventory) currentUserData.inventory = [];
+              const currentSize = currentUserData.inventory.length;
+              const maxCapacity = CONSTANTS.getInventoryCapacity(currentUserData);
+
+              if (currentSize >= maxCapacity) {
+                return selectInteraction.update({
+                  content: `❌ Tu inventario está lleno (**${currentSize}/${maxCapacity}** slots).\n` +
+                    `💡 Compra **🎒 Expansión de Inventario** para aumentar tu capacidad en +10 slots.`,
+                  components: []
+                });
+              }
+            }
+
+            // Verificar si ya tiene el item permanente
+            if (selectedItem.type === 'permanent') {
+              const hasItem = currentUserData.inventory?.some(i => i.itemId === selectedItem.id);
+              if (hasItem) {
+                return selectInteraction.update({ content: '❌ Ya posees este item permanente.', components: [] });
+              }
+            }
+
+            // Mostrar confirmación
+            const confirmButton = new ButtonBuilder()
+              .setCustomId('confirm_buy_dropdown')
+              .setLabel('Confirmar Compra')
+              .setStyle(ButtonStyle.Success);
+
+            const cancelButton = new ButtonBuilder()
+              .setCustomId('cancel_buy_dropdown')
+              .setLabel('Cancelar')
+              .setStyle(ButtonStyle.Secondary);
+
+            const confirmRow = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+            await selectInteraction.update({
+              content: `${EMOJIS.SHOP} ¿Confirmas la compra de **${selectedItem.name}** por **${selectedItem.price.toLocaleString()}** koku?\n\n` +
+                `${selectedItem.description}\n\n` +
+                `💰 Koku actual: **${currentUserData.koku.toLocaleString()}**\n` +
+                `💰 Koku después: **${(currentUserData.koku - selectedItem.price).toLocaleString()}**`,
+              components: [confirmRow]
+            });
+
+            // Collector para confirmación
+            const confirmCollector = interaction.channel.createMessageComponentCollector({
+              filter: (i) => i.user.id === userId && (i.customId === 'confirm_buy_dropdown' || i.customId === 'cancel_buy_dropdown'),
+              time: 30000,
+              max: 1
+            });
+
+            confirmCollector.on('collect', async (confirmInteraction) => {
+              if (confirmInteraction.customId === 'confirm_buy_dropdown') {
+                // Procesar compra
+                const finalUserData = dataManager.getUser(userId, guildId);
+
+                // Verificar koku nuevamente
+                if (finalUserData.koku < selectedItem.price) {
+                  return confirmInteraction.update({
+                    content: '❌ Ya no tienes suficiente koku para esta compra.',
+                    components: []
+                  });
+                }
+
+                // Inicializar inventario
+                if (!finalUserData.inventory) finalUserData.inventory = [];
+
+                // Procesar según tipo
+                finalUserData.koku -= selectedItem.price;
+                let message = '';
+
+                if (selectedItem.type === 'boost') {
+                  if (!finalUserData.activeBoosts) finalUserData.activeBoosts = [];
+                  const expiresAt = Date.now() + selectedItem.duration;
+                  finalUserData.activeBoosts.push({
+                    itemId: selectedItem.id,
+                    expiresAt: expiresAt,
+                    effect: selectedItem.effect
+                  });
+                  message = `✅ ¡Compra exitosa! Has activado **${selectedItem.name}** por ${selectedItem.duration / (60 * 60 * 1000)} horas.\n💰 Koku restante: **${finalUserData.koku.toLocaleString()}**`;
+                } else if (selectedItem.type === 'consumable') {
+                  const existing = finalUserData.inventory.find(inv => inv.itemId === selectedItem.id);
+                  if (existing) {
+                    existing.quantity = (existing.quantity || 1) + 1;
+                  } else {
+                    finalUserData.inventory.push({
+                      itemId: selectedItem.id,
+                      purchasedAt: Date.now(),
+                      quantity: 1
+                    });
+                  }
+                  message = `✅ ¡Compra exitosa! Has comprado **${selectedItem.name}**.\n💰 Koku restante: **${finalUserData.koku.toLocaleString()}**`;
+                } else if (selectedItem.type === 'permanent') {
+                  finalUserData.inventory.push({
+                    itemId: selectedItem.id,
+                    purchasedAt: Date.now()
+                  });
+                  message = `✅ ¡Compra exitosa! Has adquirido **${selectedItem.name}** permanentemente.\n💰 Koku restante: **${finalUserData.koku.toLocaleString()}**`;
+                }
+
+                await dataManager.saveUsers();
+                await confirmInteraction.update({ content: message, components: [] });
+                console.log(`🏪 ${interaction.user.tag} compró ${selectedItem.name} por ${selectedItem.price} koku`);
+              } else {
+                await confirmInteraction.update({ content: '❌ Compra cancelada.', components: [] });
+              }
+            });
+
+            confirmCollector.on('end', (collected, reason) => {
+              if (reason === 'time') {
+                selectInteraction.editReply({ content: '⏱️ Tiempo de confirmación expirado.', components: [] }).catch(() => {});
+              }
+            });
+          });
+
+          selectCollector.on('end', (collected, reason) => {
+            if (reason === 'time' && collected.size === 0) {
+              interaction.editReply({ content: '⏱️ Selección expirada.', components: [] }).catch(() => {});
+            }
+          });
+
+          return; // Exit early since we're using dropdown
+        }
+
+        // Si se proporcionó item, usar el flujo existente
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-        const itemId = interaction.options.getString('item');
         const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === itemId);
 
         if (!item) {
@@ -7596,6 +8146,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // Inicializar inventario si no existe
         if (!userData.inventory) {
           userData.inventory = [];
+        }
+
+        // Verificar capacidad del inventario (solo para consumables y permanents)
+        if (item.type === 'consumable' || item.type === 'permanent') {
+          const currentSize = userData.inventory.length;
+          const maxCapacity = CONSTANTS.getInventoryCapacity(userData);
+
+          if (currentSize >= maxCapacity) {
+            return interaction.editReply(
+              `❌ Tu inventario está lleno (**${currentSize}/${maxCapacity}** slots).\n` +
+              `💡 Compra **🎒 Expansión de Inventario** para aumentar tu capacidad en +10 slots.`
+            );
+          }
         }
 
         // Procesar la compra según el tipo de item
@@ -7661,10 +8224,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         let description = '';
+
+        // Mostrar efectos permanentes activos
+        const permanentItems = userData.inventory
+          .map(inv => Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === inv.itemId))
+          .filter(item => item && item.type === 'permanent' && item.category === 'permanent');
+
+        if (permanentItems.length > 0) {
+          description += '**✨ EFECTOS PERMANENTES ACTIVOS:**\n';
+          for (const item of permanentItems) {
+            if (item.id === 'honor_bonus_permanent') {
+              description += `⭐ +5% Honor en todas las actividades\n`;
+            } else if (item.id === 'inventory_expand') {
+              description += `🎒 +10 Slots de inventario (capacidad aumentada)\n`;
+            }
+          }
+          description += '\n';
+        }
+
+        // Mostrar boosts temporales activos
         const activeBoosts = userData.activeBoosts || [];
-        
         if (activeBoosts.length > 0) {
-          description += '**⚡ BOOSTS ACTIVOS:**\n';
+          description += '**⚡ BOOSTS TEMPORALES ACTIVOS:**\n';
           for (const boost of activeBoosts) {
             const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === boost.itemId);
             if (item) {
@@ -7693,17 +8274,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
           description += `${item.name}${quantity > 1 ? ` x${quantity}` : ''}\n`;
         }
 
+        // Calcular capacidad del inventario
+        const currentSize = userData.inventory.length;
+        const maxCapacity = CONSTANTS.getInventoryCapacity(userData);
+
         const embed = new EmbedBuilder()
           .setColor(COLORS.PRIMARY)
           .setTitle('📦 Tu Inventario')
           .setDescription(description || 'No tienes items.')
+          .addFields({
+            name: '📊 Capacidad',
+            value: `**${currentSize}/${maxCapacity}** slots utilizados`,
+            inline: true
+          })
           .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
           .setTimestamp();
 
-        // Construir botones para la vista directa de /tienda inventario (igual que en la vista interactiva)
+        // Construir botones para la vista directa de /tienda inventario
         const cosmeticItems = Object.values(groupedItems).map(({ item }) => item).filter(item => item.category === 'cosmetics');
+        const consumableItems = Object.values(groupedItems).filter(({ item }) => item.type === 'consumable');
 
         const rows = [];
+
+        // Botones para cosméticos
         if (cosmeticItems.length > 0) {
           let currentRow = new ActionRowBuilder();
           let buttonCount = 0;
@@ -7727,13 +8320,44 @@ client.on(Events.InteractionCreate, async (interaction) => {
             else if (cosmetic.id.includes('badge')) isActive = activeCosmetics.badgeId === cosmetic.id;
             else if (cosmetic.id.includes('color')) isActive = activeCosmetics.colorId === cosmetic.id;
 
-            // Truncar a 80 caracteres (límite de Discord para botones es ~80, no 18)
+            // Truncar a 80 caracteres
             const safeLabel = `${isActive ? '✅ ' : ''}${cleanName}`.substring(0, 80);
 
             const button = new ButtonBuilder()
               .setCustomId(`activate_cosmetic_${cosmetic.id}`)
               .setLabel(safeLabel)
               .setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Primary);
+
+            currentRow.addComponents(button);
+            buttonCount++;
+            if (buttonCount === 5) { rows.push(currentRow); currentRow = new ActionRowBuilder(); buttonCount = 0; }
+          }
+          if (buttonCount > 0) rows.push(currentRow);
+        }
+
+        // Botones para items consumibles
+        if (consumableItems.length > 0) {
+          let currentRow = new ActionRowBuilder();
+          let buttonCount = 0;
+          for (const { item, quantity } of consumableItems) {
+            const cleanName = item.name
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')
+              .trim();
+
+            if (!cleanName || cleanName.length === 0) {
+              console.error(`❌ ERROR: Consumible ${item.id} tiene nombre vacío`);
+              continue;
+            }
+
+            const safeLabel = `Usar: ${cleanName}${quantity > 1 ? ` (${quantity})` : ''}`.substring(0, 80);
+
+            const button = new ButtonBuilder()
+              .setCustomId(`use_consumable_${item.id}`)
+              .setLabel(safeLabel)
+              .setStyle(ButtonStyle.Success)
+              .setEmoji('🎁');
 
             currentRow.addComponents(button);
             buttonCount++;
@@ -7758,6 +8382,209 @@ client.on(Events.InteractionCreate, async (interaction) => {
               // Actualizar la respuesta efímera para cerrar el inventario (no intentar borrar ephemeral)
               await bi.update({ content: '✅ Inventario cerrado.', embeds: [], components: [] }).catch(() => {});
               return invCollector.stop('closed');
+            }
+
+            // Handler para usar consumibles
+            if (bi.customId && bi.customId.startsWith('use_consumable_')) {
+              const consumableId = bi.customId.replace('use_consumable_', '');
+              const consumableItem = Object.values(CONSTANTS.SHOP.ITEMS).find(item => item.id === consumableId);
+              const userId = bi.user.id;
+              const guildId = bi.guildId || interaction.guild.id;
+              const currentUserData = dataManager.getUser(userId, guildId);
+
+              if (!consumableItem) {
+                return bi.reply({ content: '❌ Item consumible no encontrado.', flags: MessageFlags.Ephemeral });
+              }
+
+              // Verificar que el usuario tiene el item
+              const invIndex = currentUserData.inventory.findIndex(inv => inv.itemId === consumableId);
+              if (invIndex === -1) {
+                return bi.reply({ content: '❌ No tienes este item en tu inventario.', flags: MessageFlags.Ephemeral });
+              }
+
+              await bi.deferUpdate();
+
+              // Aplicar efecto según el tipo de consumible
+              if (consumableId === 'extra_daily_claim') {
+                // Resetear cooldown de daily
+                if (!currentUserData.extraDailyUsed) {
+                  currentUserData.extraDailyUsed = {};
+                }
+                const today = new Date().toDateString();
+                if (currentUserData.extraDailyUsed[today]) {
+                  return bi.followUp({ content: '❌ Ya usaste tu reclamo diario extra hoy.', flags: MessageFlags.Ephemeral });
+                }
+
+                // Remover cooldown de daily
+                dataManager.removeCooldown(userId, 'daily');
+                currentUserData.extraDailyUsed[today] = true;
+
+                // Consumir el item
+                if ((currentUserData.inventory[invIndex].quantity || 1) > 1) {
+                  currentUserData.inventory[invIndex].quantity--;
+                } else {
+                  currentUserData.inventory.splice(invIndex, 1);
+                }
+
+                await dataManager.saveUsers();
+                await bi.followUp({
+                  content: `✅ ¡${consumableItem.name} usado! Ahora puedes reclamar \`/daily\` una vez más hoy.`,
+                  flags: MessageFlags.Ephemeral
+                });
+                console.log(`🎁 ${bi.user.tag} usó EXTRA_DAILY_CLAIM`);
+              } else if (consumableId === 'daily_bonus_2x') {
+                // Activar multiplicador para el próximo daily
+                if (!currentUserData.dailyMultiplier) {
+                  currentUserData.dailyMultiplier = 1;
+                }
+                currentUserData.dailyMultiplier = 2;
+
+                // Consumir el item
+                if ((currentUserData.inventory[invIndex].quantity || 1) > 1) {
+                  currentUserData.inventory[invIndex].quantity--;
+                } else {
+                  currentUserData.inventory.splice(invIndex, 1);
+                }
+
+                await dataManager.saveUsers();
+                await bi.followUp({
+                  content: `✅ ¡${consumableItem.name} activado! Tu próximo \`/daily\` dará **el doble** de recompensa.`,
+                  flags: MessageFlags.Ephemeral
+                });
+                console.log(`🎁 ${bi.user.tag} usó DAILY_BONUS_2X`);
+              }
+
+              // Refresh inventory display
+              const refreshedUser = dataManager.getUser(userId, guildId);
+              let desc = '';
+
+              // Mostrar efectos permanentes activos
+              const permanentItemsRef = refreshedUser.inventory
+                .map(inv => Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === inv.itemId))
+                .filter(item => item && item.type === 'permanent' && item.category === 'permanent');
+
+              if (permanentItemsRef.length > 0) {
+                desc += '**✨ EFECTOS PERMANENTES ACTIVOS:**\n';
+                for (const item of permanentItemsRef) {
+                  if (item.id === 'honor_bonus_permanent') {
+                    desc += `⭐ +5% Honor en todas las actividades\n`;
+                  } else if (item.id === 'inventory_expand') {
+                    desc += `🎒 +10 Slots de inventario (capacidad aumentada)\n`;
+                  }
+                }
+                desc += '\n';
+              }
+
+              const boostsRef = refreshedUser.activeBoosts || [];
+              if (boostsRef.length > 0) {
+                desc += '**⚡ BOOSTS TEMPORALES ACTIVOS:**\n';
+                for (const boost of boostsRef) {
+                  const item = Object.values(CONSTANTS.SHOP.ITEMS).find(it => it.id === boost.itemId);
+                  if (item) {
+                    const timeLeft = Math.max(0, boost.expiresAt - Date.now());
+                    const hoursLeft = Math.floor(timeLeft/(60*60*1000));
+                    const minutesLeft = Math.floor((timeLeft%(60*60*1000))/(60*1000));
+                    desc += `${item.name} - ${hoursLeft}h ${minutesLeft}m restantes\n`;
+                  }
+                }
+                desc += '\n';
+              }
+
+              desc += '**📦 ITEMS EN INVENTARIO:**\n';
+              const groupedRef = {};
+              for (const invItem of refreshedUser.inventory) {
+                const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === invItem.itemId);
+                if (item) {
+                  if (!groupedRef[item.id]) {
+                    groupedRef[item.id] = { item, quantity: 0 };
+                  }
+                  groupedRef[item.id].quantity += (invItem.quantity || 1);
+                }
+              }
+
+              for (const { item, quantity } of Object.values(groupedRef)) {
+                desc += `${item.name}${quantity > 1 ? ` x${quantity}` : ''}\n`;
+              }
+
+              const refreshEmbed = new EmbedBuilder()
+                .setColor(COLORS.PRIMARY)
+                .setTitle('📦 Tu Inventario')
+                .setDescription(desc || 'No tienes items.')
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              // Reconstruir botones
+              const cosmeticItemsRef = Object.values(groupedRef).map(({ item }) => item).filter(item => item.category === 'cosmetics');
+              const consumableItemsRef = Object.values(groupedRef).filter(({ item }) => item.type === 'consumable');
+              const rowsRef = [];
+
+              // Cosméticos
+              if (cosmeticItemsRef.length > 0) {
+                let currentRowRef = new ActionRowBuilder();
+                let buttonCountRef = 0;
+                for (const cosmetic of cosmeticItemsRef) {
+                  const cleanNameRef = cosmetic.name
+                    .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+                    .replace(/[\u{2600}-\u{26FF}]/gu, '')
+                    .replace(/[\u{2700}-\u{27BF}]/gu, '')
+                    .trim();
+
+                  if (!cleanNameRef) continue;
+
+                  const activeCosmeticsRef = dataManager.getActiveCosmetics(userId, guildId);
+                  let isActiveRef = false;
+                  if (cosmetic.id.includes('title')) isActiveRef = activeCosmeticsRef.titleId === cosmetic.id;
+                  else if (cosmetic.id.includes('badge')) isActiveRef = activeCosmeticsRef.badgeId === cosmetic.id;
+                  else if (cosmetic.id.includes('color')) isActiveRef = activeCosmeticsRef.colorId === cosmetic.id;
+
+                  const safeLabelRef = `${isActiveRef ? '✅ ' : ''}${cleanNameRef}`.substring(0, 80);
+
+                  const btnRef = new ButtonBuilder()
+                    .setCustomId(`activate_cosmetic_${cosmetic.id}`)
+                    .setLabel(safeLabelRef)
+                    .setStyle(isActiveRef ? ButtonStyle.Success : ButtonStyle.Primary);
+
+                  currentRowRef.addComponents(btnRef);
+                  buttonCountRef++;
+                  if (buttonCountRef === 5) { rowsRef.push(currentRowRef); currentRowRef = new ActionRowBuilder(); buttonCountRef = 0; }
+                }
+                if (buttonCountRef > 0) rowsRef.push(currentRowRef);
+              }
+
+              // Consumibles
+              if (consumableItemsRef.length > 0) {
+                let currentRowRef = new ActionRowBuilder();
+                let buttonCountRef = 0;
+                for (const { item, quantity } of consumableItemsRef) {
+                  const cleanNameRef = item.name
+                    .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+                    .replace(/[\u{2600}-\u{26FF}]/gu, '')
+                    .replace(/[\u{2700}-\u{27BF}]/gu, '')
+                    .trim();
+
+                  if (!cleanNameRef) continue;
+
+                  const safeLabelRef = `Usar: ${cleanNameRef}${quantity > 1 ? ` (${quantity})` : ''}`.substring(0, 80);
+
+                  const btnRef = new ButtonBuilder()
+                    .setCustomId(`use_consumable_${item.id}`)
+                    .setLabel(safeLabelRef)
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('🎁');
+
+                  currentRowRef.addComponents(btnRef);
+                  buttonCountRef++;
+                  if (buttonCountRef === 5) { rowsRef.push(currentRowRef); currentRowRef = new ActionRowBuilder(); buttonCountRef = 0; }
+                }
+                if (buttonCountRef > 0) rowsRef.push(currentRowRef);
+              }
+
+              const backBtnRef = new ButtonBuilder().setCustomId('shop_back_from_inventory').setLabel('Cerrar inventario').setStyle(ButtonStyle.Secondary);
+              const backRowRef = new ActionRowBuilder().addComponents(backBtnRef);
+              const finalComponentsRef = rowsRef.length > 0 ? [...rowsRef, backRowRef] : [backRowRef];
+
+              await bi.message.edit({ embeds: [refreshEmbed], components: finalComponentsRef }).catch(() => {});
+              return;
             }
 
             if (bi.customId && bi.customId.startsWith('activate_cosmetic_')) {

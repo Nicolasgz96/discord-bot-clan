@@ -44,8 +44,16 @@ module.exports = {
 
           if (minutesSinceLastGrant > 0) {
             // Otorgar honor y koku solo por los minutos RESTANTES (no por el total)
-            const honorToGrant = minutesSinceLastGrant * CONSTANTS.HONOR.PER_VOICE_MINUTE;
+            let honorToGrant = minutesSinceLastGrant * CONSTANTS.HONOR.PER_VOICE_MINUTE;
             const kokuToGrant = Math.floor(minutesSinceLastGrant * CONSTANTS.ECONOMY.PER_VOICE_MINUTE);
+
+            // Verificar si el usuario tiene bonus de honor permanente
+            const tempUserData = dataManager.getUser(userId, guildId);
+            const hasHonorBonus = tempUserData.inventory?.some(inv => inv.itemId === 'honor_bonus_permanent');
+
+            if (hasHonorBonus) {
+              honorToGrant = Math.floor(honorToGrant * 1.05); // +5% bonus
+            }
 
             try {
               const userData = dataManager.addHonor(userId, guildId, honorToGrant);
@@ -191,7 +199,18 @@ module.exports = {
         // ✅ FIX BUG #5: Cada 10 minutos, otorgar solo 10 honor (koku se calcula al salir)
         if (minutesSinceLastGrant >= 10) {
           try {
-            const userData = dataManager.addHonor(userId, guildId, CONSTANTS.HONOR.PER_VOICE_10MIN_BONUS);
+            // Calcular honor con bonus permanente si aplica
+            let honorToGrant = CONSTANTS.HONOR.PER_VOICE_10MIN_BONUS;
+
+            // Verificar si el usuario tiene bonus de honor permanente
+            const tempUserData = dataManager.getUser(userId, guildId);
+            const hasHonorBonus = tempUserData.inventory?.some(inv => inv.itemId === 'honor_bonus_permanent');
+
+            if (hasHonorBonus) {
+              honorToGrant = Math.floor(honorToGrant * 1.05); // +5% bonus
+            }
+
+            const userData = dataManager.addHonor(userId, guildId, honorToGrant);
             // Koku se calcula al salir (0.5 koku/min) para evitar duplicación
             tracking.lastHonorGrant = Date.now();
 

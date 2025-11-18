@@ -739,6 +739,19 @@ class DataManager {
   }
 
   /**
+   * Remove a specific cooldown for a user
+   */
+  removeCooldown(userId, commandName) {
+    const key = `${userId}_${commandName}`;
+    if (this.cooldowns[key]) {
+      delete this.cooldowns[key];
+      this.dataModified.cooldowns = true;
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Remove all expired cooldowns
    */
   cleanExpiredCooldowns() {

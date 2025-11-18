@@ -125,8 +125,8 @@ const commands = [
     .addUserOption(option =>
       option
         .setName('oponente')
-        .setDescription('El guerrero que deseas desafiar')
-        .setRequired(true)
+        .setDescription('El guerrero que deseas desafiar (opcional, muestra dropdown si no se especifica)')
+        .setRequired(false)
     )
     .addIntegerOption(option =>
       option
@@ -253,8 +253,8 @@ const commands = [
         .addUserOption(option =>
           option
             .setName('usuario')
-            .setDescription('Usuario a expulsar')
-            .setRequired(true)
+            .setDescription('Usuario a expulsar (opcional, muestra dropdown si no se especifica)')
+            .setRequired(false)
         )
     ),
 
@@ -285,8 +285,8 @@ const commands = [
         .addStringOption(option =>
           option
             .setName('item')
-            .setDescription('ID del item a comprar')
-            .setRequired(true)
+            .setDescription('ID del item a comprar (opcional, muestra dropdown si no se especifica)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>

@@ -173,6 +173,10 @@ const CONSTANTS = {
 
   // ==================== SISTEMA DE TIENDA ====================
   SHOP: {
+    // Inventario
+    DEFAULT_INVENTORY_SIZE: 50,        // Slots de inventario por defecto
+    INVENTORY_EXPAND_BONUS: 10,        // Slots adicionales por expansión
+
     // Categorías de items
     CATEGORIES: {
       BOOSTS: 'boosts',
@@ -541,6 +545,23 @@ CONSTANTS.getClanLevel = function(totalHonor) {
     }
   }
   return levels[0]; // Default: Clan Ronin
+};
+
+/**
+ * Calcula la capacidad total del inventario de un usuario
+ * @param {Object} userData - Datos del usuario con inventario
+ * @returns {number} Capacidad total del inventario
+ */
+CONSTANTS.getInventoryCapacity = function(userData) {
+  let capacity = CONSTANTS.SHOP.DEFAULT_INVENTORY_SIZE;
+
+  // Contar cuántas expansiones de inventario tiene el usuario
+  if (userData.inventory) {
+    const expansions = userData.inventory.filter(inv => inv.itemId === 'inventory_expand').length;
+    capacity += expansions * CONSTANTS.SHOP.INVENTORY_EXPAND_BONUS;
+  }
+
+  return capacity;
 };
 
 // ==================== VALIDACIONES ====================
