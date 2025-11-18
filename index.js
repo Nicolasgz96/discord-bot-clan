@@ -8417,8 +8417,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 // Resetear el lastDailyClaim para permitir reclamar de nuevo
                 // (El comando /daily usa lastDailyClaim, no el sistema de cooldowns)
-                currentUserData.lastDailyClaim = 0;
+                // Usar null (valor por defecto) para garantizar compatibilidad
+                currentUserData.lastDailyClaim = null;
                 currentUserData.extraDailyUsed[today] = true;
+
+                // Marcar datos como modificados para forzar guardado
+                dataManager.dataModified.users = true;
 
                 // Consumir el item
                 if ((currentUserData.inventory[invIndex].quantity || 1) > 1) {
@@ -8427,12 +8431,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   currentUserData.inventory.splice(invIndex, 1);
                 }
 
+                // Guardar inmediatamente
                 await dataManager.saveUsers();
+
+                // Verificar que se guardó correctamente
+                const verifyUser = dataManager.getUser(userId, guildId);
+                console.log(`🎁 ${bi.user.tag} usó EXTRA_DAILY_CLAIM - lastDailyClaim ahora es: ${verifyUser.lastDailyClaim}`);
+
                 await bi.followUp({
-                  content: `✅ ¡${consumableItem.name} usado! Ahora puedes reclamar \`/daily\` una vez más hoy.`,
+                  content: `✅ ¡${consumableItem.name} usado! Ahora puedes reclamar \`/daily\` una vez más hoy.\n💡 Tu cooldown de daily ha sido reseteado.`,
                   flags: MessageFlags.Ephemeral
                 });
-                console.log(`🎁 ${bi.user.tag} usó EXTRA_DAILY_CLAIM`);
               } else if (consumableId === 'daily_bonus_2x') {
                 // Activar multiplicador para el próximo daily
                 if (!currentUserData.dailyMultiplier) {
