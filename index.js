@@ -143,8 +143,19 @@ client.on(Events.MessageCreate, async (message) => {
 
       // Verificar cooldown de honor por mensajes (1 minuto)
       if (!dataManager.hasCooldown(userId, 'honor_message')) {
+        // Calcular honor con bonus permanente si aplica
+        let honorToGrant = CONSTANTS.HONOR.PER_MESSAGE;
+
+        // Obtener datos del usuario para verificar items permanentes
+        const tempUserData = dataManager.getUser(userId, guildId);
+        const hasHonorBonus = tempUserData.inventory?.some(inv => inv.itemId === 'honor_bonus_permanent');
+
+        if (hasHonorBonus) {
+          honorToGrant = Math.floor(honorToGrant * 1.05); // +5% bonus
+        }
+
         // Ganar honor (koku only for real users, not the bot)
-        const userData = dataManager.addHonor(userId, guildId, CONSTANTS.HONOR.PER_MESSAGE);
+        const userData = dataManager.addHonor(userId, guildId, honorToGrant);
         if (userData.userId !== client.user.id && !userData.isBot) {
           userData.koku = (userData.koku || 0) + CONSTANTS.ECONOMY.PER_MESSAGE;
 
@@ -7064,6 +7075,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 currentUserData.inventory = [];
               }
 
+              // Verificar capacidad del inventario (solo para consumables y permanents)
+              if (item.type === 'consumable' || item.type === 'permanent') {
+                const currentSize = currentUserData.inventory.length;
+                const maxCapacity = CONSTANTS.getInventoryCapacity(currentUserData);
+
+                if (currentSize >= maxCapacity) {
+                  currentUserData.koku += item.price; // Reembolsar
+                  await dataManager.saveUsers();
+                  return i.reply({
+                    content: `❌ Tu inventario está lleno (**${currentSize}/${maxCapacity}** slots).\n` +
+                      `💡 Compra **🎒 Expansión de Inventario** para aumentar tu capacidad en +10 slots.`,
+                    flags: MessageFlags.Ephemeral
+                  });
+                }
+              }
+
               let purchaseMessage = '';
 
               if (item.type === 'boost') {
@@ -7598,6 +7625,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
           userData.inventory = [];
         }
 
+        // Verificar capacidad del inventario (solo para consumables y permanents)
+        if (item.type === 'consumable' || item.type === 'permanent') {
+          const currentSize = userData.inventory.length;
+          const maxCapacity = CONSTANTS.getInventoryCapacity(userData);
+
+          if (currentSize >= maxCapacity) {
+            return interaction.editReply(
+              `❌ Tu inventario está lleno (**${currentSize}/${maxCapacity}** slots).\n` +
+              `💡 Compra **🎒 Expansión de Inventario** para aumentar tu capacidad en +10 slots.`
+            );
+          }
+        }
+
         // Procesar la compra según el tipo de item
         userData.koku -= item.price;
 
@@ -7661,10 +7701,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         let description = '';
+
+        // Mostrar efectos permanentes activos
+        const permanentItems = userData.inventory
+          .map(inv => Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === inv.itemId))
+          .filter(item => item && item.type === 'permanent' && item.category === 'permanent');
+
+        if (permanentItems.length > 0) {
+          description += '**✨ EFECTOS PERMANENTES ACTIVOS:**\n';
+          for (const item of permanentItems) {
+            if (item.id === 'honor_bonus_permanent') {
+              description += `⭐ +5% Honor en todas las actividades\n`;
+            } else if (item.id === 'inventory_expand') {
+              description += `🎒 +10 Slots de inventario (capacidad aumentada)\n`;
+            }
+          }
+          description += '\n';
+        }
+
+        // Mostrar boosts temporales activos
         const activeBoosts = userData.activeBoosts || [];
-        
         if (activeBoosts.length > 0) {
-          description += '**⚡ BOOSTS ACTIVOS:**\n';
+          description += '**⚡ BOOSTS TEMPORALES ACTIVOS:**\n';
           for (const boost of activeBoosts) {
             const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === boost.itemId);
             if (item) {
@@ -7693,17 +7751,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
           description += `${item.name}${quantity > 1 ? ` x${quantity}` : ''}\n`;
         }
 
+        // Calcular capacidad del inventario
+        const currentSize = userData.inventory.length;
+        const maxCapacity = CONSTANTS.getInventoryCapacity(userData);
+
         const embed = new EmbedBuilder()
           .setColor(COLORS.PRIMARY)
           .setTitle('📦 Tu Inventario')
           .setDescription(description || 'No tienes items.')
+          .addFields({
+            name: '📊 Capacidad',
+            value: `**${currentSize}/${maxCapacity}** slots utilizados`,
+            inline: true
+          })
           .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
           .setTimestamp();
 
-        // Construir botones para la vista directa de /tienda inventario (igual que en la vista interactiva)
+        // Construir botones para la vista directa de /tienda inventario
         const cosmeticItems = Object.values(groupedItems).map(({ item }) => item).filter(item => item.category === 'cosmetics');
+        const consumableItems = Object.values(groupedItems).filter(({ item }) => item.type === 'consumable');
 
         const rows = [];
+
+        // Botones para cosméticos
         if (cosmeticItems.length > 0) {
           let currentRow = new ActionRowBuilder();
           let buttonCount = 0;
@@ -7727,13 +7797,44 @@ client.on(Events.InteractionCreate, async (interaction) => {
             else if (cosmetic.id.includes('badge')) isActive = activeCosmetics.badgeId === cosmetic.id;
             else if (cosmetic.id.includes('color')) isActive = activeCosmetics.colorId === cosmetic.id;
 
-            // Truncar a 80 caracteres (límite de Discord para botones es ~80, no 18)
+            // Truncar a 80 caracteres
             const safeLabel = `${isActive ? '✅ ' : ''}${cleanName}`.substring(0, 80);
 
             const button = new ButtonBuilder()
               .setCustomId(`activate_cosmetic_${cosmetic.id}`)
               .setLabel(safeLabel)
               .setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Primary);
+
+            currentRow.addComponents(button);
+            buttonCount++;
+            if (buttonCount === 5) { rows.push(currentRow); currentRow = new ActionRowBuilder(); buttonCount = 0; }
+          }
+          if (buttonCount > 0) rows.push(currentRow);
+        }
+
+        // Botones para items consumibles
+        if (consumableItems.length > 0) {
+          let currentRow = new ActionRowBuilder();
+          let buttonCount = 0;
+          for (const { item, quantity } of consumableItems) {
+            const cleanName = item.name
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')
+              .trim();
+
+            if (!cleanName || cleanName.length === 0) {
+              console.error(`❌ ERROR: Consumible ${item.id} tiene nombre vacío`);
+              continue;
+            }
+
+            const safeLabel = `Usar: ${cleanName}${quantity > 1 ? ` (${quantity})` : ''}`.substring(0, 80);
+
+            const button = new ButtonBuilder()
+              .setCustomId(`use_consumable_${item.id}`)
+              .setLabel(safeLabel)
+              .setStyle(ButtonStyle.Success)
+              .setEmoji('🎁');
 
             currentRow.addComponents(button);
             buttonCount++;
@@ -7758,6 +7859,209 @@ client.on(Events.InteractionCreate, async (interaction) => {
               // Actualizar la respuesta efímera para cerrar el inventario (no intentar borrar ephemeral)
               await bi.update({ content: '✅ Inventario cerrado.', embeds: [], components: [] }).catch(() => {});
               return invCollector.stop('closed');
+            }
+
+            // Handler para usar consumibles
+            if (bi.customId && bi.customId.startsWith('use_consumable_')) {
+              const consumableId = bi.customId.replace('use_consumable_', '');
+              const consumableItem = Object.values(CONSTANTS.SHOP.ITEMS).find(item => item.id === consumableId);
+              const userId = bi.user.id;
+              const guildId = bi.guildId || interaction.guild.id;
+              const currentUserData = dataManager.getUser(userId, guildId);
+
+              if (!consumableItem) {
+                return bi.reply({ content: '❌ Item consumible no encontrado.', flags: MessageFlags.Ephemeral });
+              }
+
+              // Verificar que el usuario tiene el item
+              const invIndex = currentUserData.inventory.findIndex(inv => inv.itemId === consumableId);
+              if (invIndex === -1) {
+                return bi.reply({ content: '❌ No tienes este item en tu inventario.', flags: MessageFlags.Ephemeral });
+              }
+
+              await bi.deferUpdate();
+
+              // Aplicar efecto según el tipo de consumible
+              if (consumableId === 'extra_daily_claim') {
+                // Resetear cooldown de daily
+                if (!currentUserData.extraDailyUsed) {
+                  currentUserData.extraDailyUsed = {};
+                }
+                const today = new Date().toDateString();
+                if (currentUserData.extraDailyUsed[today]) {
+                  return bi.followUp({ content: '❌ Ya usaste tu reclamo diario extra hoy.', flags: MessageFlags.Ephemeral });
+                }
+
+                // Remover cooldown de daily
+                dataManager.removeCooldown(userId, 'daily');
+                currentUserData.extraDailyUsed[today] = true;
+
+                // Consumir el item
+                if ((currentUserData.inventory[invIndex].quantity || 1) > 1) {
+                  currentUserData.inventory[invIndex].quantity--;
+                } else {
+                  currentUserData.inventory.splice(invIndex, 1);
+                }
+
+                await dataManager.saveUsers();
+                await bi.followUp({
+                  content: `✅ ¡${consumableItem.name} usado! Ahora puedes reclamar \`/daily\` una vez más hoy.`,
+                  flags: MessageFlags.Ephemeral
+                });
+                console.log(`🎁 ${bi.user.tag} usó EXTRA_DAILY_CLAIM`);
+              } else if (consumableId === 'daily_bonus_2x') {
+                // Activar multiplicador para el próximo daily
+                if (!currentUserData.dailyMultiplier) {
+                  currentUserData.dailyMultiplier = 1;
+                }
+                currentUserData.dailyMultiplier = 2;
+
+                // Consumir el item
+                if ((currentUserData.inventory[invIndex].quantity || 1) > 1) {
+                  currentUserData.inventory[invIndex].quantity--;
+                } else {
+                  currentUserData.inventory.splice(invIndex, 1);
+                }
+
+                await dataManager.saveUsers();
+                await bi.followUp({
+                  content: `✅ ¡${consumableItem.name} activado! Tu próximo \`/daily\` dará **el doble** de recompensa.`,
+                  flags: MessageFlags.Ephemeral
+                });
+                console.log(`🎁 ${bi.user.tag} usó DAILY_BONUS_2X`);
+              }
+
+              // Refresh inventory display
+              const refreshedUser = dataManager.getUser(userId, guildId);
+              let desc = '';
+
+              // Mostrar efectos permanentes activos
+              const permanentItemsRef = refreshedUser.inventory
+                .map(inv => Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === inv.itemId))
+                .filter(item => item && item.type === 'permanent' && item.category === 'permanent');
+
+              if (permanentItemsRef.length > 0) {
+                desc += '**✨ EFECTOS PERMANENTES ACTIVOS:**\n';
+                for (const item of permanentItemsRef) {
+                  if (item.id === 'honor_bonus_permanent') {
+                    desc += `⭐ +5% Honor en todas las actividades\n`;
+                  } else if (item.id === 'inventory_expand') {
+                    desc += `🎒 +10 Slots de inventario (capacidad aumentada)\n`;
+                  }
+                }
+                desc += '\n';
+              }
+
+              const boostsRef = refreshedUser.activeBoosts || [];
+              if (boostsRef.length > 0) {
+                desc += '**⚡ BOOSTS TEMPORALES ACTIVOS:**\n';
+                for (const boost of boostsRef) {
+                  const item = Object.values(CONSTANTS.SHOP.ITEMS).find(it => it.id === boost.itemId);
+                  if (item) {
+                    const timeLeft = Math.max(0, boost.expiresAt - Date.now());
+                    const hoursLeft = Math.floor(timeLeft/(60*60*1000));
+                    const minutesLeft = Math.floor((timeLeft%(60*60*1000))/(60*1000));
+                    desc += `${item.name} - ${hoursLeft}h ${minutesLeft}m restantes\n`;
+                  }
+                }
+                desc += '\n';
+              }
+
+              desc += '**📦 ITEMS EN INVENTARIO:**\n';
+              const groupedRef = {};
+              for (const invItem of refreshedUser.inventory) {
+                const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === invItem.itemId);
+                if (item) {
+                  if (!groupedRef[item.id]) {
+                    groupedRef[item.id] = { item, quantity: 0 };
+                  }
+                  groupedRef[item.id].quantity += (invItem.quantity || 1);
+                }
+              }
+
+              for (const { item, quantity } of Object.values(groupedRef)) {
+                desc += `${item.name}${quantity > 1 ? ` x${quantity}` : ''}\n`;
+              }
+
+              const refreshEmbed = new EmbedBuilder()
+                .setColor(COLORS.PRIMARY)
+                .setTitle('📦 Tu Inventario')
+                .setDescription(desc || 'No tienes items.')
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              // Reconstruir botones
+              const cosmeticItemsRef = Object.values(groupedRef).map(({ item }) => item).filter(item => item.category === 'cosmetics');
+              const consumableItemsRef = Object.values(groupedRef).filter(({ item }) => item.type === 'consumable');
+              const rowsRef = [];
+
+              // Cosméticos
+              if (cosmeticItemsRef.length > 0) {
+                let currentRowRef = new ActionRowBuilder();
+                let buttonCountRef = 0;
+                for (const cosmetic of cosmeticItemsRef) {
+                  const cleanNameRef = cosmetic.name
+                    .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+                    .replace(/[\u{2600}-\u{26FF}]/gu, '')
+                    .replace(/[\u{2700}-\u{27BF}]/gu, '')
+                    .trim();
+
+                  if (!cleanNameRef) continue;
+
+                  const activeCosmeticsRef = dataManager.getActiveCosmetics(userId, guildId);
+                  let isActiveRef = false;
+                  if (cosmetic.id.includes('title')) isActiveRef = activeCosmeticsRef.titleId === cosmetic.id;
+                  else if (cosmetic.id.includes('badge')) isActiveRef = activeCosmeticsRef.badgeId === cosmetic.id;
+                  else if (cosmetic.id.includes('color')) isActiveRef = activeCosmeticsRef.colorId === cosmetic.id;
+
+                  const safeLabelRef = `${isActiveRef ? '✅ ' : ''}${cleanNameRef}`.substring(0, 80);
+
+                  const btnRef = new ButtonBuilder()
+                    .setCustomId(`activate_cosmetic_${cosmetic.id}`)
+                    .setLabel(safeLabelRef)
+                    .setStyle(isActiveRef ? ButtonStyle.Success : ButtonStyle.Primary);
+
+                  currentRowRef.addComponents(btnRef);
+                  buttonCountRef++;
+                  if (buttonCountRef === 5) { rowsRef.push(currentRowRef); currentRowRef = new ActionRowBuilder(); buttonCountRef = 0; }
+                }
+                if (buttonCountRef > 0) rowsRef.push(currentRowRef);
+              }
+
+              // Consumibles
+              if (consumableItemsRef.length > 0) {
+                let currentRowRef = new ActionRowBuilder();
+                let buttonCountRef = 0;
+                for (const { item, quantity } of consumableItemsRef) {
+                  const cleanNameRef = item.name
+                    .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+                    .replace(/[\u{2600}-\u{26FF}]/gu, '')
+                    .replace(/[\u{2700}-\u{27BF}]/gu, '')
+                    .trim();
+
+                  if (!cleanNameRef) continue;
+
+                  const safeLabelRef = `Usar: ${cleanNameRef}${quantity > 1 ? ` (${quantity})` : ''}`.substring(0, 80);
+
+                  const btnRef = new ButtonBuilder()
+                    .setCustomId(`use_consumable_${item.id}`)
+                    .setLabel(safeLabelRef)
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('🎁');
+
+                  currentRowRef.addComponents(btnRef);
+                  buttonCountRef++;
+                  if (buttonCountRef === 5) { rowsRef.push(currentRowRef); currentRowRef = new ActionRowBuilder(); buttonCountRef = 0; }
+                }
+                if (buttonCountRef > 0) rowsRef.push(currentRowRef);
+              }
+
+              const backBtnRef = new ButtonBuilder().setCustomId('shop_back_from_inventory').setLabel('Cerrar inventario').setStyle(ButtonStyle.Secondary);
+              const backRowRef = new ActionRowBuilder().addComponents(backBtnRef);
+              const finalComponentsRef = rowsRef.length > 0 ? [...rowsRef, backRowRef] : [backRowRef];
+
+              await bi.message.edit({ embeds: [refreshEmbed], components: finalComponentsRef }).catch(() => {});
+              return;
             }
 
             if (bi.customId && bi.customId.startsWith('activate_cosmetic_')) {
