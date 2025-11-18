@@ -3661,6 +3661,241 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({ content: MESSAGES.CLAN.ONLY_LEADER, flags: MessageFlags.Ephemeral });
         }
 
+        // If no user provided, show dropdown
+        if (!targetUser) {
+          // Get all server members
+          await interaction.guild.members.fetch();
+          const guildMembers = interaction.guild.members.cache;
+
+          // Filter: not in clan, not bot, not already in this clan
+          const invitableMembers = guildMembers.filter(member => {
+            if (member.user.bot) return false;
+            const memberData = dataManager.getUser(member.id, guildId);
+            return !memberData.clanId;
+          });
+
+          if (invitableMembers.size === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay miembros disponibles para invitar. Todos los miembros ya están en clanes.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Verificar que el clan no esté lleno
+          const clanLevel = dataManager.getClanLevel(clan.totalHonor);
+          if (clan.members.length >= clanLevel.maxMembers) {
+            return interaction.reply({ content: MESSAGES.CLAN.CLAN_FULL(clanLevel.maxMembers), flags: MessageFlags.Ephemeral });
+          }
+
+          // Create dropdown options (limit to 25 for Discord)
+          const options = invitableMembers.first(25).map(member => {
+            const memberData = dataManager.getUser(member.id, guildId);
+            const rankEmoji = EMOJIS[memberData.rank.toUpperCase()] || EMOJIS.RONIN;
+            return new StringSelectMenuOptionBuilder()
+              .setLabel(member.displayName.substring(0, 100))
+              .setDescription(`${rankEmoji} ${memberData.honor} honor • ${memberData.rank}`.substring(0, 100))
+              .setValue(member.id)
+              .setEmoji('👤');
+          });
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('clan_invite_select')
+            .setPlaceholder('👤 Selecciona un miembro para invitar')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('✉️ Invitar Miembro al Clan')
+            .setDescription(
+              `Selecciona el miembro que deseas invitar a **${clan.name}**.\n\n` +
+              `**Miembros disponibles:** ${invitableMembers.size}\n` +
+              `**Espacio en clan:** ${clan.members.length}/${clanLevel.maxMembers}\n\n` +
+              `💡 Solo puedes invitar miembros que no estén en otro clan`
+            )
+            .setFooter({ text: 'El menú expira en 5 minutos' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for member selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'clan_invite_select') {
+                const selectedUserId = i.values[0];
+                const selectedUser = await interaction.client.users.fetch(selectedUserId);
+
+                if (!selectedUser || selectedUser.bot) {
+                  return i.update({
+                    content: MESSAGES.ERRORS.INVALID_USER,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Verify user isn't in clan (check again)
+                const targetUserData = dataManager.getUser(selectedUser.id, guildId);
+                if (targetUserData.clanId) {
+                  return i.update({
+                    content: `${EMOJIS.WARNING} ${selectedUser.tag} ya pertenece a otro clan.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Verify clan not full
+                const currentClanLevel = dataManager.getClanLevel(clan.totalHonor);
+                if (clan.members.length >= currentClanLevel.maxMembers) {
+                  return i.update({
+                    content: MESSAGES.CLAN.CLAN_FULL(currentClanLevel.maxMembers),
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Send invitation
+                const acceptButton = new ButtonBuilder()
+                  .setCustomId('accept_clan_invite')
+                  .setLabel('Aceptar')
+                  .setStyle(ButtonStyle.Success)
+                  .setEmoji(EMOJIS.SUCCESS);
+
+                const declineButton = new ButtonBuilder()
+                  .setCustomId('decline_clan_invite')
+                  .setLabel('Rechazar')
+                  .setStyle(ButtonStyle.Danger)
+                  .setEmoji(EMOJIS.CROSS);
+
+                const inviteRow = new ActionRowBuilder().addComponents(acceptButton, declineButton);
+
+                const inviteEmbed = new EmbedBuilder()
+                  .setColor(currentClanLevel.color)
+                  .setTitle(`${EMOJIS.CLAN_INVITE} Invitación al Clan`)
+                  .setDescription(MESSAGES.CLAN.INVITATION_RECEIVED(clan.name, i.member?.displayName || i.user.username))
+                  .addFields(
+                    { name: `${EMOJIS.CLAN_TAG} Tag`, value: `[${clan.tag}]`, inline: true },
+                    { name: `${EMOJIS.CLAN_LEVEL} Nivel`, value: `${currentClanLevel.level} - ${currentClanLevel.name}`, inline: true },
+                    { name: `${EMOJIS.MEMBERS} Miembros`, value: `${clan.members.length}/${currentClanLevel.maxMembers}`, inline: true },
+                    { name: `${EMOJIS.HONOR} Honor Total`, value: `${clan.totalHonor.toLocaleString()} puntos`, inline: true }
+                  )
+                  .setFooter({ text: 'Tienes 2 minutos para responder' })
+                  .setTimestamp();
+
+                await i.update({
+                  content: MESSAGES.CLAN.INVITATION_SENT(selectedUser.tag),
+                  embeds: [],
+                  components: []
+                });
+
+                // Enviar invitación al usuario
+                try {
+                  const inviteMessage = await selectedUser.send({ embeds: [inviteEmbed], components: [inviteRow] });
+
+                  // (Keep existing collector logic from here...)
+                  const inviteCollector = inviteMessage.createMessageComponentCollector({ time: 120000 });
+
+                  inviteCollector.on('collect', async (inviteInteraction) => {
+                    if (inviteInteraction.user.id !== selectedUser.id) return;
+
+                    if (inviteInteraction.customId === 'accept_clan_invite') {
+                      const updatedClanLevel = dataManager.getClanLevel(clan.totalHonor);
+                      if (clan.members.length >= updatedClanLevel.maxMembers) {
+                        await inviteInteraction.update({ content: MESSAGES.CLAN.CLAN_FULL(updatedClanLevel.maxMembers), embeds: [], components: [] });
+                        return;
+                      }
+
+                      const invitedUserData = dataManager.getUser(selectedUser.id, guildId);
+                      if (invitedUserData.clanId) {
+                        await inviteInteraction.update({ content: MESSAGES.CLAN.ALREADY_IN_CLAN, embeds: [], components: [] });
+                        return;
+                      }
+
+                      invitedUserData.clanId = clan.clanId;
+                      dataManager.addClanMember(clan.clanId, selectedUser.id);
+                      dataManager.updateClanStats(clan.clanId);
+                      await dataManager.saveUsers();
+                      await dataManager.saveClans();
+
+                      await inviteInteraction.update({
+                        content: MESSAGES.CLAN.JOINED(clan.name, clan.tag),
+                        embeds: [],
+                        components: []
+                      });
+
+                      console.log(`${EMOJIS.CLAN_JOIN} ${selectedUser.tag} se unió al clan "${clan.name}" por invitación`);
+
+                      try {
+                        const leader = await interaction.guild.members.fetch(clan.leaderId);
+                        await leader.send(`${EMOJIS.SUCCESS} **${selectedUser.tag}** ha aceptado tu invitación y se ha unido a **${clan.name}**!`);
+                      } catch (error) {
+                        // Ignore DM errors
+                      }
+                    } else if (inviteInteraction.customId === 'decline_clan_invite') {
+                      await inviteInteraction.update({
+                        content: `${EMOJIS.CROSS} Has rechazado la invitación al clan **${clan.name}**.`,
+                        embeds: [],
+                        components: []
+                      });
+
+                      try {
+                        const leader = await interaction.guild.members.fetch(clan.leaderId);
+                        await leader.send(`${EMOJIS.WARNING} **${selectedUser.tag}** ha rechazado tu invitación al clan **${clan.name}**.`);
+                      } catch (error) {
+                        // Ignore DM errors
+                      }
+                    }
+
+                    inviteCollector.stop();
+                  });
+
+                  inviteCollector.on('end', (collected, reason) => {
+                    if (reason === 'time' && collected.size === 0) {
+                      inviteMessage.edit({
+                        content: `${EMOJIS.WARNING} La invitación al clan **${clan.name}** ha expirado.`,
+                        embeds: [],
+                        components: []
+                      }).catch(() => {});
+                    }
+                  });
+                } catch (error) {
+                  await i.followUp({
+                    content: `${EMOJIS.ERROR} No se pudo enviar la invitación a ${selectedUser.tag}. Puede que tenga los DMs desactivados.`,
+                    flags: MessageFlags.Ephemeral
+                  });
+                }
+
+                collector.stop('completed');
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando invitación:`, error);
+              await i.reply({
+                content: `${EMOJIS.ERROR} Hubo un error al enviar la invitación. Intenta de nuevo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de invitación expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
+        }
+
         // Verificar que no sea un bot
         if (targetUser.bot) {
           return interaction.reply({ content: MESSAGES.ERRORS.INVALID_USER, flags: MessageFlags.Ephemeral });
