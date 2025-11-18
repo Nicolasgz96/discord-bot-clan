@@ -4513,6 +4513,258 @@ client.on(Events.InteractionCreate, async (interaction) => {
       console.log(`${EMOJIS.HONOR} ${interaction.user.tag} consultó sus logros (${stats.total}/${stats.totalPossible})`);
     }
 
+    // ==================== PERSONALIZACIÓN DE PERFIL ====================
+
+    // /perfil - Sistema de personalización
+    else if (commandName === 'perfil') {
+      const subcommand = interaction.options.getSubcommand();
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+      const profileCustomization = require('./utils/profileCustomization');
+      const userData = dataManager.getUser(userId, guildId);
+
+      // ========== /perfil fondo ==========
+      if (subcommand === 'fondo') {
+        const imageUrl = interaction.options.getString('url');
+
+        try {
+          profileCustomization.setCustomBackground(userData, imageUrl);
+          dataManager.dataModified.users = true;
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} Fondo Actualizado`)
+            .setDescription(
+              `Tu fondo de perfil ha sido cambiado.\n\n` +
+              `**Vista previa:**`
+            )
+            .setImage(imageUrl)
+            .setFooter({ text: 'El fondo se mostrará en tu tarjeta de bienvenida y perfil' })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} cambió su fondo de perfil`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /perfil color ==========
+      else if (subcommand === 'color') {
+        const colorInput = interaction.options.getString('codigo');
+
+        try {
+          let hexColor = colorInput;
+
+          // Check if it's a preset name
+          if (!colorInput.startsWith('#')) {
+            const preset = profileCustomization.getColorPreset(colorInput);
+            hexColor = preset.color;
+          }
+
+          profileCustomization.setCustomColor(userData, hexColor);
+          dataManager.dataModified.users = true;
+
+          const embed = new EmbedBuilder()
+            .setColor(hexColor)
+            .setTitle(`${EMOJIS.SUCCESS} Color Actualizado`)
+            .setDescription(
+              `Tu color de embeds ha sido cambiado.\n\n` +
+              `**Nuevo color:** ${hexColor}\n` +
+              `Este embed muestra tu nuevo color.`
+            )
+            .setFooter({ text: 'El color se aplicará a tus embeds de perfil' })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} cambió su color a ${hexColor}`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /perfil titulo ==========
+      else if (subcommand === 'titulo') {
+        const title = interaction.options.getString('titulo');
+
+        try {
+          profileCustomization.setDisplayTitle(userData, title);
+          dataManager.dataModified.users = true;
+
+          const embed = new EmbedBuilder()
+            .setColor(userData.customization?.embedColor || COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} Título Actualizado`)
+            .setAuthor({
+              name: profileCustomization.getDisplayNameWithTitle(interaction.user.username, userData),
+              iconURL: interaction.user.displayAvatarURL()
+            })
+            .setDescription(
+              `Tu título visible ha sido actualizado.\n\n` +
+              `**Nuevo título:** ${title}\n\n` +
+              `Ahora se mostrará en tus perfiles y comandos.`
+            )
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} estableció su título: ${title}`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /perfil bio ==========
+      else if (subcommand === 'bio') {
+        const bio = interaction.options.getString('texto');
+
+        try {
+          profileCustomization.setBio(userData, bio);
+          dataManager.dataModified.users = true;
+
+          const embed = new EmbedBuilder()
+            .setColor(userData.customization?.embedColor || COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} Biografía Actualizada`)
+            .setDescription(
+              `Tu biografía ha sido actualizada.\n\n` +
+              `**Nueva biografía:**\n` +
+              `*"${bio}"*`
+            )
+            .setFooter({ text: `${bio.length}/100 caracteres` })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} actualizó su biografía`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /perfil ver ==========
+      else if (subcommand === 'ver') {
+        const summary = profileCustomization.getCustomizationSummary(userData);
+
+        const embed = new EmbedBuilder()
+          .setColor(userData.customization?.embedColor || COLORS.PRIMARY)
+          .setTitle('🎨 Tu Personalización')
+          .setAuthor({
+            name: profileCustomization.getDisplayNameWithTitle(interaction.user.username, userData),
+            iconURL: interaction.user.displayAvatarURL()
+          })
+          .addFields(
+            {
+              name: '🖼️ Fondo de Perfil',
+              value: summary.hasCustomBackground
+                ? `[Ver imagen](${summary.backgroundUrl})`
+                : 'Por defecto',
+              inline: true
+            },
+            {
+              name: '🎨 Color de Embeds',
+              value: summary.embedColor,
+              inline: true
+            },
+            {
+              name: '👑 Título Visible',
+              value: summary.displayTitle,
+              inline: true
+            },
+            {
+              name: '📝 Biografía',
+              value: summary.bio,
+              inline: false
+            }
+          )
+          .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+          .setTimestamp();
+
+        // Add available titles
+        if (summary.availableTitles.length > 0) {
+          embed.addFields({
+            name: '🏆 Títulos Disponibles',
+            value: summary.availableTitles.map(t => `• ${t}`).join('\n'),
+            inline: false
+          });
+        }
+
+        // Show background if custom
+        if (summary.hasCustomBackground) {
+          embed.setImage(summary.backgroundUrl);
+        }
+
+        await interaction.reply({ embeds: [embed] });
+        console.log(`${EMOJIS.INFO} ${interaction.user.tag} consultó su personalización`);
+      }
+
+      // ========== /perfil colores ==========
+      else if (subcommand === 'colores') {
+        const presets = profileCustomization.getAllColorPresets();
+
+        const colorFields = Object.entries(presets).map(([key, preset]) => ({
+          name: `${preset.name} (\`${key}\`)`,
+          value: `Color: ${preset.color}`,
+          inline: true
+        }));
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle('🎨 Paleta de Colores')
+          .setDescription(
+            'Usa `/perfil color codigo:<nombre>` para aplicar un preset.\n' +
+            'También puedes usar código hexadecimal: `/perfil color codigo:#FF5733`'
+          )
+          .addFields(colorFields)
+          .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
+      }
+
+      // ========== /perfil reiniciar ==========
+      else if (subcommand === 'reiniciar') {
+        const tipo = interaction.options.getString('tipo');
+
+        try {
+          profileCustomization.resetCustomization(userData, tipo);
+          dataManager.dataModified.users = true;
+
+          const tipoNames = {
+            background: 'fondo',
+            color: 'color',
+            title: 'título',
+            bio: 'biografía',
+            all: 'toda la personalización'
+          };
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle(`${EMOJIS.SUCCESS} Personalización Reiniciada`)
+            .setDescription(`Se ha reiniciado: **${tipoNames[tipo]}**`)
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.reply({ embeds: [embed] });
+          console.log(`${EMOJIS.INFO} ${interaction.user.tag} reinició: ${tipo}`);
+        } catch (error) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+    }
+
     // ==================== SISTEMA DE EVENTOS ====================
 
     // /evento - Sistema de eventos y competencias

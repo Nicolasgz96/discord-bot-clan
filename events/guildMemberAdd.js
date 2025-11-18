@@ -11,7 +11,7 @@ const MESSAGES = require('../src/config/messages');
 
 module.exports = {
   name: Events.GuildMemberAdd,
-  async execute(member, config) {
+  async execute(member, { config, dataManager }) {
     // ========== ASIGNACIÓN AUTOMÁTICA DE ROL ==========
     if (config.autoRole && config.autoRole.enabled && config.autoRole.roleId) {
       try {
@@ -77,8 +77,11 @@ module.exports = {
         return;
       }
 
-      // Crear la tarjeta de bienvenida
-      const attachment = await createWelcomeCard(member);
+      // Get user data for custom background
+      const userData = dataManager ? dataManager.getUser(member.id, member.guild.id) : null;
+
+      // Crear la tarjeta de bienvenida (with custom background if set)
+      const attachment = await createWelcomeCard(member, userData);
 
       // Usar mención explícita para que el usuario reciba la alerta en el canal
       const mention = `<@${member.user.id}>`;

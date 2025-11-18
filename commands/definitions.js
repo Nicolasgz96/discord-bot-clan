@@ -692,6 +692,83 @@ const commands = [
     .setName('medallas')
     .setDescription('🏅 Ver tus medallas y progreso de logros'),
 
+  // ==================== PERSONALIZACIÓN DE PERFIL ====================
+  new SlashCommandBuilder()
+    .setName('perfil')
+    .setDescription('🎨 Sistema de personalización de perfil')
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('fondo')
+        .setDescription('🖼️ Cambiar fondo de perfil')
+        .addStringOption(option =>
+          option
+            .setName('url')
+            .setDescription('URL de la imagen de fondo (Imgur, Discord CDN recomendados)')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('color')
+        .setDescription('🎨 Cambiar color de embeds')
+        .addStringOption(option =>
+          option
+            .setName('codigo')
+            .setDescription('Código hexadecimal (#FF5733) o nombre de preset')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('titulo')
+        .setDescription('👑 Establecer título visible')
+        .addStringOption(option =>
+          option
+            .setName('titulo')
+            .setDescription('Título a mostrar (debe estar desbloqueado)')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('bio')
+        .setDescription('📝 Establecer biografía personal')
+        .addStringOption(option =>
+          option
+            .setName('texto')
+            .setDescription('Tu biografía (máx. 100 caracteres)')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('ver')
+        .setDescription('👁️ Ver tu personalización actual')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('colores')
+        .setDescription('🎨 Ver paleta de colores disponibles')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('reiniciar')
+        .setDescription('🔄 Reiniciar personalización')
+        .addStringOption(option =>
+          option
+            .setName('tipo')
+            .setDescription('Qué reiniciar')
+            .setRequired(true)
+            .addChoices(
+              { name: '🖼️ Fondo', value: 'background' },
+              { name: '🎨 Color', value: 'color' },
+              { name: '👑 Título', value: 'title' },
+              { name: '📝 Biografía', value: 'bio' },
+              { name: '🔄 Todo', value: 'all' }
+            )
+        )
+    ),
+
   // ==================== SISTEMA DE EVENTOS ====================
   new SlashCommandBuilder()
     .setName('evento')
