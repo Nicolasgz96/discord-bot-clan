@@ -148,6 +148,23 @@ module.exports = {
                 }
               }
 
+              // ========== TRACK VOICE TIME FOR ACTIVE EVENTS ==========
+              // Check if user is participating in any voice marathon events
+              try {
+                const { getEventManager, EVENT_STATUS } = require('../utils/eventManager');
+                const eventManager = getEventManager();
+                const activeEvents = eventManager.getActiveEvents(guildId);
+
+                for (const event of activeEvents) {
+                  if (event.type === 'voice_marathon' && event.participants.includes(userId)) {
+                    eventManager.trackVoiceTime(event.id, userId, totalMinutes);
+                  }
+                }
+              } catch (e) {
+                // Ignore event tracking errors
+              }
+              // ========== END VOICE MARATHON TRACKING ==========
+
               console.log(`${EMOJIS.VOICE} ${oldState.member.user.tag} ganó ${honorToGrant} honor + ${kokuToGrant} koku por ${minutesSinceLastGrant} minutos restantes en voz (total: ${totalMinutes} min)`);
             } catch (error) {
               console.error('Error otorgando honor/koku por voz:', error.message);

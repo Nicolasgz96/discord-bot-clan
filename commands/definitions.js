@@ -691,6 +691,191 @@ const commands = [
   new SlashCommandBuilder()
     .setName('medallas')
     .setDescription('🏅 Ver tus medallas y progreso de logros'),
+
+  // ==================== SISTEMA DE EVENTOS ====================
+  new SlashCommandBuilder()
+    .setName('evento')
+    .setDescription('🎪 Sistema de eventos y competencias del dojo')
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('crear')
+        .setDescription('⚔️ Crear un nuevo evento (Solo Administradores)')
+        .addStringOption(option =>
+          option
+            .setName('tipo')
+            .setDescription('Tipo de evento')
+            .setRequired(true)
+            .addChoices(
+              { name: '⚔️ Torneo de Duelos', value: 'duel_tournament' },
+              { name: '📚 Trivia Samurai', value: 'trivia' },
+              { name: '🏗️ Concurso de Construcción', value: 'building_contest' },
+              { name: '🎤 Maratón de Voz', value: 'voice_marathon' },
+              { name: '💰 Carrera de Koku', value: 'koku_rush' }
+            )
+        )
+        .addStringOption(option =>
+          option
+            .setName('nombre')
+            .setDescription('Nombre del evento')
+            .setRequired(true)
+        )
+        .addStringOption(option =>
+          option
+            .setName('descripcion')
+            .setDescription('Descripción del evento')
+            .setRequired(false)
+        )
+        .addIntegerOption(option =>
+          option
+            .setName('duracion')
+            .setDescription('Duración en horas (por defecto varía según tipo)')
+            .setRequired(false)
+            .setMinValue(1)
+            .setMaxValue(168) // 7 days max
+        )
+        .addIntegerOption(option =>
+          option
+            .setName('max_participantes')
+            .setDescription('Máximo de participantes (por defecto varía según tipo)')
+            .setRequired(false)
+            .setMinValue(2)
+            .setMaxValue(100)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('unirse')
+        .setDescription('✅ Unirse a un evento')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('Nombre o ID del evento')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('salir')
+        .setDescription('❌ Salir de un evento')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('Nombre o ID del evento')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('ver')
+        .setDescription('👁️ Ver detalles de un evento')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('Nombre o ID del evento (vacío = todos los eventos activos)')
+            .setRequired(false)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('clasificacion')
+        .setDescription('🏆 Ver clasificación de un evento')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('Nombre o ID del evento')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('iniciar')
+        .setDescription('▶️ Iniciar un evento (Solo Administradores)')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('Nombre o ID del evento')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('finalizar')
+        .setDescription('🏁 Finalizar un evento y otorgar premios (Solo Administradores)')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('Nombre o ID del evento')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('cancelar')
+        .setDescription('🚫 Cancelar un evento (Solo Administradores)')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('Nombre o ID del evento')
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('lista')
+        .setDescription('📋 Ver todos los eventos del servidor')
+        .addStringOption(option =>
+          option
+            .setName('estado')
+            .setDescription('Filtrar por estado')
+            .setRequired(false)
+            .addChoices(
+              { name: '⏳ Pendientes', value: 'pending' },
+              { name: '▶️ Activos', value: 'active' },
+              { name: '✅ Completados', value: 'completed' },
+              { name: '🚫 Cancelados', value: 'cancelled' }
+            )
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('enviar')
+        .setDescription('📸 Enviar construcción para concurso')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('ID del evento')
+            .setRequired(true)
+        )
+        .addStringOption(option =>
+          option
+            .setName('imagen_url')
+            .setDescription('URL de la imagen de tu construcción')
+            .setRequired(true)
+        )
+        .addStringOption(option =>
+          option
+            .setName('descripcion')
+            .setDescription('Descripción de tu construcción')
+            .setRequired(false)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('votar')
+        .setDescription('🗳️ Votar por una construcción')
+        .addStringOption(option =>
+          option
+            .setName('evento')
+            .setDescription('ID del evento')
+            .setRequired(true)
+        )
+        .addUserOption(option =>
+          option
+            .setName('usuario')
+            .setDescription('Usuario cuya construcción quieres votar')
+            .setRequired(true)
+        )
+    ),
 ];
 
 module.exports = commands;
