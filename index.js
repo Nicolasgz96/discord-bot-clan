@@ -6942,16 +6942,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
           for (let i = 0; i < maxOptions; i++) {
             const item = items[i];
             const canAfford = userData.koku >= item.price;
-            const duration = item.duration 
-              ? ` (${item.duration / (60 * 60 * 1000)}h)` 
+            const duration = item.duration
+              ? ` (${item.duration / (60 * 60 * 1000)}h)`
               : '';
-            
-            // Remover emojis del nombre para el label (más limpio)
-            const cleanName = item.name.replace(/[⚡🔥💰⏱️🎁👑🌟🏅🥉🥈🥇🎒📅⭐]/g, '').trim();
-            
+
+            // Remover TODOS los emojis del nombre para el label
+            const cleanName = item.name
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '') // Emojis Unicode
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')   // Símbolos variados
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
+              .trim();
+
+            // Truncar label y descripción a límites de Discord
+            const safeLabel = (cleanName || item.name).substring(0, 100);
+            const safeDesc = `${item.price.toLocaleString()} koku${duration} - ${item.description}`.substring(0, 100);
+
             const option = new StringSelectMenuOptionBuilder()
-              .setLabel(cleanName || item.name) // Si se removió todo, usar el nombre original
-              .setDescription(`${item.price.toLocaleString()} koku${duration} - ${item.description.substring(0, 50)}`)
+              .setLabel(safeLabel)
+              .setDescription(safeDesc)
               .setValue(item.id)
               .setDefault(false);
             
@@ -7199,8 +7207,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   let buttonCount = 0;
 
                   for (const cosmetic of cosmeticItems) {
-                    const cleanName = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g, '').trim();
-                    
+                    // Limpiar TODOS los emojis
+                    const cleanName = cosmetic.name
+                      .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+                      .replace(/[\u{2600}-\u{26FF}]/gu, '')
+                      .replace(/[\u{2700}-\u{27BF}]/gu, '')
+                      .trim();
+
+                    if (!cleanName || cleanName.length === 0) {
+                      console.error(`❌ ERROR: Cosmético ${cosmetic.id} tiene nombre vacío en botón interactivo`);
+                      continue;
+                    }
+
                     // Determinar si está activo
                     const activeCosmetics = dataManager.getActiveCosmetics(userId, guildId);
                     let isActive = false;
@@ -7212,9 +7230,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
                       isActive = activeCosmetics.colorId === cosmetic.id;
                     }
 
+                    const safeLabel = `${isActive ? '✅ ' : ''}${cleanName}`.substring(0, 80);
+
                     const button = new ButtonBuilder()
                       .setCustomId(`activate_cosmetic_${cosmetic.id}`)
-                      .setLabel(`${isActive ? '✅' : ''} ${cleanName.substring(0, 18)}`.trim())
+                      .setLabel(safeLabel)
                       .setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Primary);
 
                     currentRow.addComponents(button);
@@ -7409,15 +7429,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     const activeCosmeticsRef = dataManager.getActiveCosmetics(userId, guildId);
 
                     for (const cosmetic of cosmeticItemsRef) {
-                      const cleanName = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g, '').trim();
+                      // Limpiar TODOS los emojis
+                      const cleanName = cosmetic.name
+                        .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+                        .replace(/[\u{2600}-\u{26FF}]/gu, '')
+                        .replace(/[\u{2700}-\u{27BF}]/gu, '')
+                        .trim();
+
+                      if (!cleanName || cleanName.length === 0) {
+                        console.error(`❌ ERROR: Cosmético ${cosmetic.id} tiene nombre vacío en refresh`);
+                        continue;
+                      }
+
                       let isActiveRef = false;
                       if (cosmetic.id.includes('title')) isActiveRef = activeCosmeticsRef.titleId === cosmetic.id;
                       else if (cosmetic.id.includes('badge')) isActiveRef = activeCosmeticsRef.badgeId === cosmetic.id;
                       else if (cosmetic.id.includes('color')) isActiveRef = activeCosmeticsRef.colorId === cosmetic.id;
 
+                      const safeLabelRef = `${isActiveRef ? '✅ ' : ''}${cleanName}`.substring(0, 80);
+
                       const btn = new ButtonBuilder()
                         .setCustomId(`activate_cosmetic_${cosmetic.id}`)
-                        .setLabel(`${isActiveRef ? '✅' : ''} ${cleanName.substring(0, 18)}`.trim())
+                        .setLabel(safeLabelRef)
                         .setStyle(isActiveRef ? ButtonStyle.Success : ButtonStyle.Primary);
 
                       currentRowRef.addComponents(btn);
@@ -7675,16 +7708,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let currentRow = new ActionRowBuilder();
           let buttonCount = 0;
           for (const cosmetic of cosmeticItems) {
-            const cleanName = cosmetic.name.replace(/[👑🌟🏅🥉🥈🥇🎨]/g, '').trim();
+            // Limpiar TODOS los emojis usando regex completa
+            const cleanName = cosmetic.name
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '') // Emojis Unicode
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')   // Símbolos variados
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
+              .trim();
+
+            // Validar que el nombre no esté vacío
+            if (!cleanName || cleanName.length === 0) {
+              console.error(`❌ ERROR: Cosmético ${cosmetic.id} tiene nombre vacío en inventario`);
+              continue;
+            }
+
             const activeCosmetics = dataManager.getActiveCosmetics(interaction.user.id, interaction.guild.id);
             let isActive = false;
             if (cosmetic.id.includes('title')) isActive = activeCosmetics.titleId === cosmetic.id;
             else if (cosmetic.id.includes('badge')) isActive = activeCosmetics.badgeId === cosmetic.id;
             else if (cosmetic.id.includes('color')) isActive = activeCosmetics.colorId === cosmetic.id;
 
+            // Truncar a 80 caracteres (límite de Discord para botones es ~80, no 18)
+            const safeLabel = `${isActive ? '✅ ' : ''}${cleanName}`.substring(0, 80);
+
             const button = new ButtonBuilder()
               .setCustomId(`activate_cosmetic_${cosmetic.id}`)
-              .setLabel(`${isActive ? '✅' : ''} ${cleanName.substring(0, 18)}`.trim())
+              .setLabel(safeLabel)
               .setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Primary);
 
             currentRow.addComponents(button);
