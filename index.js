@@ -2957,12 +2957,142 @@ client.on(Events.InteractionCreate, async (interaction) => {
             return interaction.reply({ content: MESSAGES.CLAN.CLAN_NOT_FOUND, flags: MessageFlags.Ephemeral });
           }
         } else {
-          // Mostrar clan del usuario
-          const user = dataManager.getUser(userId, guildId);
-          if (!user.clanId) {
-            return interaction.reply({ content: MESSAGES.CLAN.NOT_IN_CLAN, flags: MessageFlags.Ephemeral });
+          // Show dropdown to select clan
+          const allClans = dataManager.getAllClans(guildId);
+
+          if (allClans.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay clanes en este servidor.`,
+              flags: MessageFlags.Ephemeral
+            });
           }
-          clan = dataManager.getClan(user.clanId);
+
+          // Create dropdown options
+          const options = allClans.map(c => {
+            const clanLevel = dataManager.getClanLevel(c.totalHonor);
+            return new StringSelectMenuOptionBuilder()
+              .setLabel(`[${c.tag}] ${c.name}`.substring(0, 100))
+              .setDescription(`Nivel ${clanLevel.level} • ${c.members.length} miembros • ${c.totalHonor} honor`.substring(0, 100))
+              .setValue(c.clanId)
+              .setEmoji('🏯');
+          });
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('clan_info_select')
+            .setPlaceholder('🏯 Selecciona un clan para ver detalles')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('📜 Información de Clanes')
+            .setDescription(
+              `Selecciona un clan del menú abajo para ver sus detalles completos.\n\n` +
+              `**Clanes en el servidor:** ${allClans.length}\n\n` +
+              `💡 Usa \`/clan top\` para ver el ranking de clanes`
+            )
+            .setFooter({ text: 'El menú expira en 5 minutos' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for clan selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'clan_info_select') {
+                const selectedClanId = i.values[0];
+                clan = dataManager.getClan(selectedClanId);
+
+                if (!clan) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} El clan seleccionado ya no existe.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                await i.deferUpdate();
+
+                // Obtener info del clan (same logic as below)
+                const clanLevel = dataManager.getClanLevel(clan.totalHonor);
+                const leaderMember = await interaction.guild.members.fetch(clan.leaderId).catch(() => null);
+                const leaderName = leaderMember ? (leaderMember.displayName || leaderMember.user.username) : 'Usuario desconocido';
+                const leaderUser = dataManager.getUser(clan.leaderId, guildId);
+                const leaderRankEmoji = EMOJIS[leaderUser.rank.toUpperCase()] || EMOJIS.RONIN;
+
+                // Crear lista de miembros con rangos
+                let membersList = '';
+                const memberPromises = clan.members.slice(0, 10).map(async (memberId) => {
+                  const member = await interaction.guild.members.fetch(memberId).catch(() => null);
+                  const memberUser = dataManager.getUser(memberId, guildId);
+                  const rankEmoji = EMOJIS[memberUser.rank.toUpperCase()] || EMOJIS.RONIN;
+                  const isLeader = memberId === clan.leaderId;
+                  const leaderBadge = isLeader ? `${EMOJIS.LEADER} ` : '';
+                  const memberDisplayName = member ? (member.displayName || member.user.username) : 'Usuario desconocido';
+                  return `${leaderBadge}${rankEmoji} ${memberDisplayName} - ${memberUser.honor.toLocaleString()} honor`;
+                });
+
+                const membersData = await Promise.all(memberPromises);
+                membersList = membersData.join('\n');
+
+                if (clan.members.length > 10) {
+                  membersList += `\n... y ${clan.members.length - 10} miembros más`;
+                }
+
+                // Crear embed
+                const createdDate = new Date(clan.createdAt).toLocaleDateString('es-ES');
+                const progressToNext = clanLevel.nextLevelHonor
+                  ? `${clan.totalHonor.toLocaleString()}/${clanLevel.nextLevelHonor.toLocaleString()} (${Math.floor(clan.totalHonor / clanLevel.nextLevelHonor * 100)}%)`
+                  : 'Nivel Máximo';
+
+                const clanEmbed = new EmbedBuilder()
+                  .setColor(clanLevel.color)
+                  .setTitle(`${EMOJIS.CLAN} ${clan.name} [${clan.tag}]`)
+                  .setDescription(`${EMOJIS.CLAN_LEVEL} **Nivel ${clanLevel.level}** - ${clanLevel.name}`)
+                  .addFields(
+                    { name: `${EMOJIS.LEADER} Líder`, value: `${leaderRankEmoji} ${leaderName}`, inline: true },
+                    { name: `${EMOJIS.MEMBERS} Miembros`, value: `${clan.members.length}/${clanLevel.maxMembers}`, inline: true },
+                    { name: `${EMOJIS.HONOR} Honor Total`, value: `${clan.totalHonor.toLocaleString()} puntos`, inline: true },
+                    { name: `${EMOJIS.CALENDAR} Fundado`, value: createdDate, inline: true },
+                    { name: `${EMOJIS.CHART} Progreso`, value: progressToNext, inline: true },
+                    { name: `\u200b`, value: `\u200b`, inline: true },
+                    { name: `${EMOJIS.MEMBERS} Miembros del Clan`, value: membersList || 'Sin miembros', inline: false }
+                  )
+                  .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                  .setTimestamp();
+
+                await i.editReply({ embeds: [clanEmbed], components: [] });
+                console.log(`${EMOJIS.CLAN_INFO} ${i.user.tag} consultó info del clan "${clan.name}"`);
+                collector.stop('completed');
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando info de clan:`, error);
+              await i.reply({
+                content: `${EMOJIS.ERROR} Hubo un error al mostrar la info del clan. Intenta de nuevo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de info de clanes expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
         }
 
         await interaction.deferReply();
@@ -3029,6 +3159,154 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({ content: MESSAGES.CLAN.ALREADY_IN_CLAN, flags: MessageFlags.Ephemeral });
         }
 
+        // If no clan name provided, show dropdown
+        if (!clanNameInput) {
+          const allClans = dataManager.getAllClans(guildId);
+
+          if (allClans.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay clanes en este servidor.\n💡 Usa \`/clan crear\` para crear tu propio clan (requiere rango Daimyo y 5,000 koku).`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Filter out full clans
+          const joinableClans = allClans.filter(clan => {
+            const clanLevel = dataManager.getClanLevel(clan.totalHonor);
+            return clan.members.length < clanLevel.maxMembers;
+          });
+
+          if (joinableClans.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} Todos los clanes están llenos. Espera a que haya espacio o crea tu propio clan.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Create dropdown options
+          const options = joinableClans.map(clan => {
+            const clanLevel = dataManager.getClanLevel(clan.totalHonor);
+            return new StringSelectMenuOptionBuilder()
+              .setLabel(`[${clan.tag}] ${clan.name}`.substring(0, 100))
+              .setDescription(`Nivel ${clanLevel.level} • ${clan.members.length}/${clanLevel.maxMembers} miembros • ${clan.totalHonor} honor`.substring(0, 100))
+              .setValue(clan.clanId)
+              .setEmoji('🏯');
+          });
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('clan_join_select')
+            .setPlaceholder('🏯 Selecciona un clan para unirte')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('🏯 Unirse a Clan')
+            .setDescription(
+              `Selecciona el clan al que deseas unirte del menú abajo.\n\n` +
+              `**Clanes disponibles:** ${joinableClans.length}\n\n` +
+              `💡 Usa \`/clan info\` para ver más detalles de un clan`
+            )
+            .setFooter({ text: 'El menú expira en 5 minutos' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for clan selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'clan_join_select') {
+                const selectedClanId = i.values[0];
+                const clan = dataManager.getClan(selectedClanId);
+
+                if (!clan) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} El clan seleccionado ya no existe.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Re-check user clan status
+                const currentUser = dataManager.getUser(userId, guildId);
+                if (currentUser.clanId) {
+                  return i.update({
+                    content: MESSAGES.CLAN.ALREADY_IN_CLAN,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Verificar si el clan está lleno
+                const clanLevel = dataManager.getClanLevel(clan.totalHonor);
+                if (clan.members.length >= clanLevel.maxMembers) {
+                  return i.update({
+                    content: MESSAGES.CLAN.CLAN_FULL(clanLevel.maxMembers),
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                await i.deferUpdate();
+
+                // Añadir al usuario al clan
+                currentUser.clanId = clan.clanId;
+                dataManager.addClanMember(clan.clanId, userId);
+                dataManager.updateClanStats(clan.clanId);
+
+                // Guardar datos
+                await dataManager.saveUsers();
+                await dataManager.saveClans();
+
+                await i.editReply({
+                  content: MESSAGES.CLAN.JOINED(clan.name, clan.tag),
+                  embeds: [],
+                  components: []
+                });
+                console.log(`${EMOJIS.CLAN_JOIN} ${i.user.tag} se unió al clan "${clan.name}"`);
+
+                // Notificar al líder
+                try {
+                  const leader = await interaction.guild.members.fetch(clan.leaderId);
+                  const memberDisplayName = i.member?.displayName || i.user.username;
+                  await leader.send(`${MESSAGES.CLAN.MEMBER_JOINED(memberDisplayName)}\n${EMOJIS.CLAN} Clan: **${clan.name}**`);
+                } catch (error) {
+                  // Ignorar si no se puede enviar DM
+                }
+
+                collector.stop('completed');
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando unión a clan:`, error);
+              await i.reply({
+                content: `${EMOJIS.ERROR} Hubo un error al unirte al clan. Intenta de nuevo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de clanes para unirse expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
+        }
+
+        // Original logic when clan name is provided
         // Buscar el clan
         const clan = dataManager.findClanByNameOrTag(guildId, clanNameInput);
         if (!clan) {
@@ -5001,6 +5279,131 @@ client.on(Events.InteractionCreate, async (interaction) => {
       else if (subcommand === 'unirse') {
         const eventoQuery = interaction.options.getString('evento');
 
+        // If no event provided, show dropdown menu
+        if (!eventoQuery) {
+          const guildEvents = eventManager.getGuildEvents(guildId);
+          const joinableEvents = guildEvents.filter(e =>
+            (e.status === EVENT_STATUS.PENDING || e.status === EVENT_STATUS.ACTIVE) &&
+            !e.participants.includes(userId) &&
+            e.participants.length < e.maxParticipants
+          );
+
+          if (joinableEvents.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay eventos disponibles para unirse. Intenta:\n• Espera a que se creen nuevos eventos\n• Ya estás en todos los eventos activos`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Create dropdown options
+          const options = joinableEvents.map(event =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(event.name.substring(0, 100))
+              .setDescription(`${event.emoji} ${event.participants.length}/${event.maxParticipants} participantes - ${event.status === EVENT_STATUS.ACTIVE ? '▶️ Activo' : '⏳ Pendiente'}`.substring(0, 100))
+              .setValue(event.id)
+              .setEmoji(event.emoji)
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('event_join_select')
+            .setPlaceholder('✅ Selecciona un evento para unirte')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('✅ Unirse a Evento')
+            .setDescription(
+              `Selecciona el evento al que deseas unirte del menú abajo.\n\n` +
+              `**Eventos disponibles:** ${joinableEvents.length}\n\n` +
+              `💡 Puedes ver detalles de cada evento con \`/evento ver\``
+            )
+            .setFooter({ text: 'El menú expira en 5 minutos' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for event selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'event_join_select') {
+                const selectedEventId = i.values[0];
+                const event = eventManager.getEvent(selectedEventId);
+
+                if (!event) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} El evento seleccionado ya no existe.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Try to join the event
+                try {
+                  eventManager.joinEvent(event.id, userId);
+
+                  // Initialize koku tracking for koku rush events
+                  if (event.type === 'koku_rush') {
+                    const userData = dataManager.getUser(userId, guildId);
+                    event.metadata.startingKoku[userId] = userData.koku || 0;
+                    eventManager.saveEvents();
+                  }
+
+                  const successEmbed = new EmbedBuilder()
+                    .setColor(COLORS.SUCCESS)
+                    .setTitle(`${EMOJIS.SUCCESS} ¡Te has unido al evento!`)
+                    .setDescription(
+                      `**${event.name}**\n` +
+                      `${event.description}\n\n` +
+                      `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n` +
+                      `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}`
+                    )
+                    .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                    .setTimestamp();
+
+                  await i.update({ embeds: [successEmbed], components: [] });
+                  console.log(`${EMOJIS.SUCCESS} ${i.user.tag} se unió al evento: ${event.name}`);
+                  collector.stop('completed');
+                } catch (error) {
+                  await i.update({
+                    content: `${EMOJIS.ERROR} ${error.message}`,
+                    embeds: [],
+                    components: []
+                  });
+                  collector.stop('error');
+                }
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando selección de evento:`, error);
+              await i.reply({
+                content: `${EMOJIS.ERROR} Hubo un error al unirte al evento. Intenta de nuevo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de eventos para unirse expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
+        }
+
+        // Original logic when evento is provided
         try {
           // Find event by name or ID
           let event = eventManager.getEvent(eventoQuery);
@@ -5052,6 +5455,113 @@ client.on(Events.InteractionCreate, async (interaction) => {
       else if (subcommand === 'salir') {
         const eventoQuery = interaction.options.getString('evento');
 
+        // If no event provided, show dropdown menu with user's events
+        if (!eventoQuery) {
+          const guildEvents = eventManager.getGuildEvents(guildId);
+          const userEvents = guildEvents.filter(e => e.participants.includes(userId));
+
+          if (userEvents.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No estás participando en ningún evento actualmente.\n💡 Usa \`/evento lista\` para ver eventos disponibles y \`/evento unirse\` para unirte.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Create dropdown options
+          const options = userEvents.map(event =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(event.name.substring(0, 100))
+              .setDescription(`${event.emoji} ${event.participants.length} participantes - ${event.status === EVENT_STATUS.ACTIVE ? '▶️ Activo' : event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : event.status === EVENT_STATUS.COMPLETED ? '✅ Completado' : '🚫 Cancelado'}`.substring(0, 100))
+              .setValue(event.id)
+              .setEmoji(event.emoji)
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('event_leave_select')
+            .setPlaceholder('❌ Selecciona un evento para salir')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.WARNING)
+            .setTitle('❌ Salir de Evento')
+            .setDescription(
+              `Selecciona el evento del que deseas salir del menú abajo.\n\n` +
+              `**Tus eventos:** ${userEvents.length}\n\n` +
+              `⚠️ Al salir perderás tu progreso en el evento`
+            )
+            .setFooter({ text: 'El menú expira en 5 minutos' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for event selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'event_leave_select') {
+                const selectedEventId = i.values[0];
+                const event = eventManager.getEvent(selectedEventId);
+
+                if (!event) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} El evento seleccionado ya no existe.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Try to leave the event
+                try {
+                  eventManager.leaveEvent(event.id, userId);
+
+                  await i.update({
+                    content: `${EMOJIS.SUCCESS} Has salido del evento **${event.name}**.`,
+                    embeds: [],
+                    components: []
+                  });
+
+                  console.log(`${EMOJIS.VOICE} ${i.user.tag} salió del evento: ${event.name}`);
+                  collector.stop('completed');
+                } catch (error) {
+                  await i.update({
+                    content: `${EMOJIS.ERROR} ${error.message}`,
+                    embeds: [],
+                    components: []
+                  });
+                  collector.stop('error');
+                }
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando salida de evento:`, error);
+              await i.reply({
+                content: `${EMOJIS.ERROR} Hubo un error al salir del evento. Intenta de nuevo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de eventos para salir expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
+        }
+
+        // Original logic when evento is provided
         try {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
@@ -5089,31 +5599,128 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         try {
           if (!eventoQuery) {
-            // Show all active events
-            const activeEvents = eventManager.getActiveEvents(guildId);
+            // Show dropdown to select event
+            const guildEvents = eventManager.getGuildEvents(guildId);
 
-            if (activeEvents.length === 0) {
+            if (guildEvents.length === 0) {
               return interaction.reply({
-                content: `${EMOJIS.INFO} No hay eventos activos en este servidor.`,
+                content: `${EMOJIS.INFO} No hay eventos en este servidor.`,
                 flags: MessageFlags.Ephemeral
               });
             }
 
+            // Create dropdown options
+            const options = guildEvents.map(event =>
+              new StringSelectMenuOptionBuilder()
+                .setLabel(event.name.substring(0, 100))
+                .setDescription(`${event.emoji} ${event.participants.length}/${event.maxParticipants} participantes - ${event.status === EVENT_STATUS.ACTIVE ? '▶️ Activo' : event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : event.status === EVENT_STATUS.COMPLETED ? '✅ Completado' : '🚫 Cancelado'}`.substring(0, 100))
+                .setValue(event.id)
+                .setEmoji(event.emoji)
+            );
+
+            const selectMenu = new StringSelectMenuBuilder()
+              .setCustomId('event_view_select')
+              .setPlaceholder('👁️ Selecciona un evento para ver detalles')
+              .addOptions(options);
+
+            const row = new ActionRowBuilder()
+              .addComponents(selectMenu);
+
             const embed = new EmbedBuilder()
               .setColor(COLORS.PRIMARY)
-              .setTitle('📋 Eventos Activos')
+              .setTitle('👁️ Ver Detalles de Evento')
               .setDescription(
-                activeEvents.map(e =>
-                  `${e.emoji} **${e.name}**\n` +
-                  `ID: \`${e.id}\`\n` +
-                  `Participantes: ${e.participants.length}/${e.maxParticipants}\n` +
-                  `Finaliza: <t:${Math.floor(e.endTime / 1000)}:R>`
-                ).join('\n\n')
+                `Selecciona un evento del menú abajo para ver sus detalles completos.\n\n` +
+                `**Eventos en el servidor:** ${guildEvents.length}\n\n` +
+                `💡 Usa \`/evento lista\` para ver resumen de todos los eventos`
               )
-              .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+              .setFooter({ text: 'El menú expira en 5 minutos' })
               .setTimestamp();
 
-            return interaction.reply({ embeds: [embed] });
+            const response = await interaction.reply({
+              embeds: [embed],
+              components: [row],
+              flags: MessageFlags.Ephemeral,
+              fetchReply: true
+            });
+
+            // Create collector for event selection
+            const collector = response.createMessageComponentCollector({
+              componentType: ComponentType.StringSelect,
+              time: 300000 // 5 minutos
+            });
+
+            collector.on('collect', async (i) => {
+              try {
+                if (i.customId === 'event_view_select') {
+                  const selectedEventId = i.values[0];
+                  const event = eventManager.getEvent(selectedEventId);
+
+                  if (!event) {
+                    return i.update({
+                      content: `${EMOJIS.ERROR} El evento seleccionado ya no existe.`,
+                      embeds: [],
+                      components: []
+                    });
+                  }
+
+                  const statusEmoji = {
+                    pending: '⏳',
+                    active: '▶️',
+                    completed: '✅',
+                    cancelled: '🚫'
+                  }[event.status];
+
+                  const detailEmbed = new EmbedBuilder()
+                    .setColor(COLORS.PRIMARY)
+                    .setTitle(`${event.emoji} ${event.name}`)
+                    .setDescription(event.description)
+                    .addFields(
+                      { name: '🆔 ID', value: `\`${event.id}\``, inline: true },
+                      { name: '📊 Estado', value: `${statusEmoji} ${event.status}`, inline: true },
+                      { name: '👥 Participantes', value: `${event.participants.length}/${event.maxParticipants}`, inline: true },
+                      { name: '⏰ Inicio', value: `<t:${Math.floor(event.startTime / 1000)}:F>`, inline: true },
+                      { name: '🏁 Finaliza', value: `<t:${Math.floor(event.endTime / 1000)}:R>`, inline: true },
+                      { name: '👤 Creador', value: `<@${event.creatorId}>`, inline: true }
+                    )
+                    .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                    .setTimestamp();
+
+                  // Add prizes if any
+                  if (event.prizes && Object.keys(event.prizes).length > 0) {
+                    const prizeText = Object.entries(event.prizes)
+                      .slice(0, 3)
+                      .map(([rank, prize]) => {
+                        const medal = rank === '1' ? '🥇' : rank === '2' ? '🥈' : '🥉';
+                        let text = `${medal} **Puesto ${rank}:** ${prize.koku || 0} ${EMOJIS.KOKU}`;
+                        if (prize.title) text += ` + Título: "${prize.title}"`;
+                        return text;
+                      })
+                      .join('\n');
+
+                    detailEmbed.addFields({ name: '🏆 Premios', value: prizeText, inline: false });
+                  }
+
+                  await i.update({ embeds: [detailEmbed], components: [] });
+                  console.log(`${EMOJIS.INFO} ${i.user.tag} vio detalles del evento: ${event.name}`);
+                  collector.stop('completed');
+                }
+              } catch (error) {
+                console.error(`❌ Error procesando visualización de evento:`, error);
+                await i.reply({
+                  content: `${EMOJIS.ERROR} Hubo un error al mostrar el evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              }
+            });
+
+            collector.on('end', (collected, reason) => {
+              if (reason === 'time') {
+                console.log(`⏱️ Selector de eventos para ver expiró para ${interaction.user.tag}`);
+              }
+            });
+
+            return;
           }
 
           // Show specific event
@@ -5717,6 +6324,179 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const eventoId = interaction.options.getString('evento');
         const targetUser = interaction.options.getUser('usuario');
 
+        // If no parameters provided, show event dropdown first
+        if (!eventoId && !targetUser) {
+          const guildEvents = eventManager.getGuildEvents(guildId);
+          const buildingEvents = guildEvents.filter(e =>
+            e.type === 'building_contest' &&
+            e.status === EVENT_STATUS.ACTIVE &&
+            e.metadata && e.metadata.submissions && Object.keys(e.metadata.submissions).length > 0
+          );
+
+          if (buildingEvents.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay concursos de construcción activos con envíos disponibles para votar.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Create dropdown options for events
+          const options = buildingEvents.map(event =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(event.name.substring(0, 100))
+              .setDescription(`${event.emoji} ${Object.keys(event.metadata.submissions).length} construcciones - ${event.participants.length} participantes`.substring(0, 100))
+              .setValue(event.id)
+              .setEmoji('🗳️')
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('event_vote_select_event')
+            .setPlaceholder('🗳️ Selecciona un concurso de construcción')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('🗳️ Votar por Construcción')
+            .setDescription(
+              `Selecciona el concurso de construcción en el que deseas votar.\n\n` +
+              `**Concursos disponibles:** ${buildingEvents.length}\n\n` +
+              `💡 Después podrás elegir por cuál construcción votar`
+            )
+            .setFooter({ text: 'El menú expira en 5 minutos' })
+            .setTimestamp();
+
+          const response = await interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral,
+            fetchReply: true
+          });
+
+          // Create collector for event selection
+          const collector = response.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 300000 // 5 minutos
+          });
+
+          collector.on('collect', async (i) => {
+            try {
+              if (i.customId === 'event_vote_select_event') {
+                const selectedEventId = i.values[0];
+                const event = eventManager.getEvent(selectedEventId);
+
+                if (!event || !event.metadata || !event.metadata.submissions) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} El evento seleccionado ya no existe o no tiene envíos.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                const submissions = Object.entries(event.metadata.submissions);
+
+                if (submissions.length === 0) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} Este concurso no tiene envíos disponibles para votar.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Create dropdown for user submissions
+                const userOptions = await Promise.all(submissions.map(async ([submissionUserId, submission]) => {
+                  try {
+                    const user = await interaction.client.users.fetch(submissionUserId);
+                    return new StringSelectMenuOptionBuilder()
+                      .setLabel(user.username.substring(0, 100))
+                      .setDescription((submission.description || 'Sin descripción').substring(0, 100))
+                      .setValue(submissionUserId)
+                      .setEmoji('🏗️');
+                  } catch (error) {
+                    return new StringSelectMenuOptionBuilder()
+                      .setLabel(`Usuario ${submissionUserId}`)
+                      .setDescription((submission.description || 'Sin descripción').substring(0, 100))
+                      .setValue(submissionUserId)
+                      .setEmoji('🏗️');
+                  }
+                }));
+
+                const userSelectMenu = new StringSelectMenuBuilder()
+                  .setCustomId(`event_vote_select_user:${selectedEventId}`)
+                  .setPlaceholder('🏗️ Selecciona una construcción para votar')
+                  .addOptions(userOptions);
+
+                const userRow = new ActionRowBuilder()
+                  .addComponents(userSelectMenu);
+
+                const userEmbed = new EmbedBuilder()
+                  .setColor(COLORS.PRIMARY)
+                  .setTitle(`🗳️ Votar en: ${event.name}`)
+                  .setDescription(
+                    `Selecciona la construcción por la que deseas votar.\n\n` +
+                    `**Construcciones disponibles:** ${submissions.length}\n\n` +
+                    `⚠️ Solo puedes votar una vez por concurso`
+                  )
+                  .setFooter({ text: 'El menú expira en 5 minutos' })
+                  .setTimestamp();
+
+                await i.update({ embeds: [userEmbed], components: [userRow] });
+              } else if (i.customId.startsWith('event_vote_select_user:')) {
+                const selectedEventId = i.customId.split(':')[1];
+                const selectedUserId = i.values[0];
+                const event = eventManager.getEvent(selectedEventId);
+
+                if (!event) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} El evento ya no existe.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                try {
+                  eventManager.voteBuildingEntry(selectedEventId, userId, selectedUserId);
+
+                  const votedUser = await interaction.client.users.fetch(selectedUserId);
+
+                  await i.update({
+                    content: `${EMOJIS.SUCCESS} Has votado por la construcción de **${votedUser.username}** en **${event.name}**.`,
+                    embeds: [],
+                    components: []
+                  });
+
+                  console.log(`${EMOJIS.SUCCESS} ${i.user.tag} votó por ${votedUser.tag} en: ${event.name}`);
+                  collector.stop('completed');
+                } catch (error) {
+                  await i.update({
+                    content: `${EMOJIS.ERROR} ${error.message}`,
+                    embeds: [],
+                    components: []
+                  });
+                  collector.stop('error');
+                }
+              }
+            } catch (error) {
+              console.error(`❌ Error procesando voto:`, error);
+              await i.reply({
+                content: `${EMOJIS.ERROR} Hubo un error al procesar tu voto. Intenta de nuevo.`,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+          });
+
+          collector.on('end', (collected, reason) => {
+            if (reason === 'time') {
+              console.log(`⏱️ Selector de votos expiró para ${interaction.user.tag}`);
+            }
+          });
+
+          return;
+        }
+
+        // Original logic when parameters are provided
         try {
           const event = eventManager.getEvent(eventoId);
 

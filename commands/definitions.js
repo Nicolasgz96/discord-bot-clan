@@ -125,8 +125,8 @@ const commands = [
     .addUserOption(option =>
       option
         .setName('oponente')
-        .setDescription('El guerrero que deseas desafiar')
-        .setRequired(true)
+        .setDescription('El guerrero que deseas desafiar (opcional - muestra menú si se omite)')
+        .setRequired(false)
     )
     .addIntegerOption(option =>
       option
@@ -216,8 +216,8 @@ const commands = [
         .addStringOption(option =>
           option
             .setName('nombre')
-            .setDescription('Nombre o tag del clan')
-            .setRequired(true)
+            .setDescription('Nombre o tag del clan (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
@@ -242,8 +242,8 @@ const commands = [
         .addUserOption(option =>
           option
             .setName('usuario')
-            .setDescription('Usuario a invitar')
-            .setRequired(true)
+            .setDescription('Usuario a invitar (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
@@ -253,8 +253,8 @@ const commands = [
         .addUserOption(option =>
           option
             .setName('usuario')
-            .setDescription('Usuario a expulsar')
-            .setRequired(true)
+            .setDescription('Usuario a expulsar (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
     ),
 
@@ -285,8 +285,8 @@ const commands = [
         .addStringOption(option =>
           option
             .setName('item')
-            .setDescription('ID del item a comprar')
-            .setRequired(true)
+            .setDescription('ID del item a comprar (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
@@ -826,8 +826,8 @@ const commands = [
         .addStringOption(option =>
           option
             .setName('evento')
-            .setDescription('Nombre o ID del evento')
-            .setRequired(true)
+            .setDescription('Nombre o ID del evento (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
@@ -837,8 +837,8 @@ const commands = [
         .addStringOption(option =>
           option
             .setName('evento')
-            .setDescription('Nombre o ID del evento')
-            .setRequired(true)
+            .setDescription('Nombre o ID del evento (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
@@ -943,14 +943,14 @@ const commands = [
         .addStringOption(option =>
           option
             .setName('evento')
-            .setDescription('ID del evento')
-            .setRequired(true)
+            .setDescription('ID del evento (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
         .addUserOption(option =>
           option
             .setName('usuario')
-            .setDescription('Usuario cuya construcción quieres votar')
-            .setRequired(true)
+            .setDescription('Usuario cuya construcción quieres votar (opcional con menú)')
+            .setRequired(false)
         )
     ),
 ];
