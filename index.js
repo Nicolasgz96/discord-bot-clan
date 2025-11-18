@@ -8406,7 +8406,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
               // Aplicar efecto según el tipo de consumible
               if (consumableId === 'extra_daily_claim') {
-                // Resetear cooldown de daily
+                // Verificar si ya usó el extra daily hoy
                 if (!currentUserData.extraDailyUsed) {
                   currentUserData.extraDailyUsed = {};
                 }
@@ -8415,8 +8415,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   return bi.followUp({ content: '❌ Ya usaste tu reclamo diario extra hoy.', flags: MessageFlags.Ephemeral });
                 }
 
-                // Remover cooldown de daily
-                dataManager.removeCooldown(userId, 'daily');
+                // Resetear el lastDailyClaim para permitir reclamar de nuevo
+                // (El comando /daily usa lastDailyClaim, no el sistema de cooldowns)
+                currentUserData.lastDailyClaim = 0;
                 currentUserData.extraDailyUsed[today] = true;
 
                 // Consumir el item
