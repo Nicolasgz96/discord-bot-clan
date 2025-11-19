@@ -9020,6 +9020,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             const updatedDuel = combatManager.getDuel(duelId);
 
+            // Verificar que el duelo aún existe
+            if (!updatedDuel) {
+              return btnInteraction.followUp({
+                content: '❌ El combate ha finalizado o expiró.',
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
             if (result.gameOver) {
               const finalEmbed = combatManager.generateCombatEmbed(updatedDuel);
               finalEmbed.addFields({
@@ -9068,6 +9076,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const aiResult = combatManager.processAction(duelId, updatedDuel.opponent.userId, aiAction.actionType, aiAction.actionData);
 
             const duelAfterAI = combatManager.getDuel(duelId);
+
+            // Verificar que el duelo aún existe después del turno de IA
+            if (!duelAfterAI) {
+              return btnInteraction.followUp({
+                content: '❌ El combate ha finalizado.',
+                flags: MessageFlags.Ephemeral
+              });
+            }
 
             if (aiResult.gameOver) {
               const finalEmbed = combatManager.generateCombatEmbed(duelAfterAI);
@@ -9347,6 +9363,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         // Continuar combate - actualizar estado
         const updatedDuel = combatManager.getDuel(duelId);
+
+        // Verificar que el duelo aún existe
+        if (!updatedDuel) {
+          return buttonInteraction.update({
+            content: '❌ El combate ha finalizado.',
+            components: []
+          });
+        }
+
         const updatedEmbed = combatManager.generateCombatEmbed(updatedDuel);
         const updatedButtons = combatManager.generateCombatButtons(updatedDuel.challenger);
 

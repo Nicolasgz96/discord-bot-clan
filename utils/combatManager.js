@@ -709,9 +709,34 @@ class CombatManager {
   }
 
   /**
+   * Obtener últimas acciones del combatLog
+   */
+  getRecentCombatLog(duel, count = 3) {
+    if (!duel.combatLog || duel.combatLog.length === 0) {
+      return 'El combate está por comenzar...';
+    }
+
+    const recentActions = duel.combatLog.slice(-count);
+    const challengerName = duel.challenger.userData?.username || 'Retador';
+    const opponentName = duel.opponent.userData?.username || 'Oponente';
+
+    return recentActions.map(log => {
+      const playerName = log.player === 'challenger' ? challengerName : opponentName;
+      return `**${playerName}:** ${log.result}`;
+    }).join('\n');
+  }
+
+  /**
    * Generar embed del estado del combate
    */
   generateCombatEmbed(duel) {
+    if (!duel) {
+      return new EmbedBuilder()
+        .setTitle('⚔️ Combate Finalizado')
+        .setDescription('El duelo ha terminado.')
+        .setColor('#95A5A6');
+    }
+
     const challenger = duel.challenger;
     const opponent = duel.opponent;
 
@@ -746,8 +771,19 @@ class CombatManager {
           value: `❤️ HP: ${opponentHPBar} ${opponent.hp}/${opponent.maxHP}\n⚡ Ki: ${'🔷'.repeat(opponent.ki)}${'⬜'.repeat(opponent.maxKi - opponent.ki)} ${opponent.ki}/${opponent.maxKi}`,
           inline: true
         }
-      )
-      .setFooter({ text: footerText });
+      );
+
+    // Agregar log de combate reciente
+    const recentLog = this.getRecentCombatLog(duel, 3);
+    if (recentLog) {
+      embed.addFields({
+        name: '📜 Últimas Acciones',
+        value: recentLog,
+        inline: false
+      });
+    }
+
+    embed.setFooter({ text: footerText });
 
     // Agregar efectos activos
     if (currentTurnPlayer.effects.length > 0) {
