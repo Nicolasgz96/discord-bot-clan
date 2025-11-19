@@ -181,6 +181,7 @@ const CONSTANTS = {
     CATEGORIES: {
       BOOSTS: 'boosts',
       COSMETICS: 'cosmetics',
+      CONSUMABLES: 'consumables',
       PERMANENT: 'permanent'
     },
 
@@ -227,11 +228,22 @@ const CONSTANTS = {
         duration: 12 * 60 * 60 * 1000,
         effect: { cooldownReduction: 0.5 }
       },
+
+      // ========== ITEMS CONSUMIBLES ==========
+      EXTRA_DAILY_CLAIM: {
+        id: 'extra_daily_claim',
+        name: '📅 Reclamo Diario Extra',
+        description: 'Permite reclamar el daily una vez más hoy (se consume al usar)',
+        category: 'consumables',
+        price: 800,
+        type: 'consumable',
+        effect: { extraDaily: true }
+      },
       DAILY_BONUS_2X: {
         id: 'daily_bonus_2x',
         name: '🎁 Daily Bonus x2',
-        description: 'Duplica tu próxima recompensa diaria',
-        category: 'boosts',
+        description: 'Duplica tu próxima recompensa diaria (se consume al usar)',
+        category: 'consumables',
         price: 400,
         type: 'consumable',
         effect: { dailyMultiplier: 2 }
@@ -297,25 +309,16 @@ const CONSTANTS = {
       INVENTORY_EXPAND: {
         id: 'inventory_expand',
         name: '🎒 Expansión de Inventario',
-        description: 'Aumenta tu capacidad de inventario en +10 slots',
+        description: 'Aumenta tu capacidad de inventario en +10 slots (permanente)',
         category: 'permanent',
         price: 2500,
         type: 'permanent',
         effect: { inventorySlots: 10 }
       },
-      EXTRA_DAILY_CLAIM: {
-        id: 'extra_daily_claim',
-        name: '📅 Reclamo Diario Extra',
-        description: 'Permite reclamar el daily una vez más hoy',
-        category: 'permanent',
-        price: 800,
-        type: 'consumable',
-        effect: { extraDaily: true }
-      },
       HONOR_BONUS_PERMANENT: {
         id: 'honor_bonus_permanent',
         name: '⭐ Bonus de Honor Permanente',
-        description: '+5% de honor permanente en todas las actividades',
+        description: '+5% de honor permanente en todas las actividades (permanente)',
         category: 'permanent',
         price: 15000,
         type: 'permanent',

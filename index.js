@@ -7329,6 +7329,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setStyle(ButtonStyle.Secondary)
           .setEmoji('🎨');
 
+        const consumablesButton = new ButtonBuilder()
+          .setCustomId('shop_category_consumables')
+          .setLabel('Consumibles')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('⛩️');
+
         const permanentButton = new ButtonBuilder()
           .setCustomId('shop_category_permanent')
           .setLabel('Permanentes')
@@ -7349,8 +7355,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         // Crear filas de componentes
         const categoryRow = new ActionRowBuilder()
-          .addComponents(allButton, boostsButton, cosmeticsButton, permanentButton, inventoryButton);
-        
+          .addComponents(allButton, boostsButton, cosmeticsButton, consumablesButton, permanentButton);
+
+        const inventoryRow = new ActionRowBuilder()
+          .addComponents(inventoryButton);
+
         const closeRow = new ActionRowBuilder()
           .addComponents(closeButton);
 
@@ -7361,7 +7370,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const initialCategory = interaction.options.getString('categoria');
         const message = await interaction.editReply({
           embeds: [generateShopEmbed(initialCategory)],
-          components: [selectMenuRow, categoryRow, closeRow],
+          components: [selectMenuRow, categoryRow, inventoryRow, closeRow],
           flags: MessageFlags.Ephemeral
         });
 
@@ -7843,6 +7852,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 newCategory = 'boosts';
               } else if (i.customId === 'shop_category_cosmetics') {
                 newCategory = 'cosmetics';
+              } else if (i.customId === 'shop_category_consumables') {
+                newCategory = 'consumables';
               } else if (i.customId === 'shop_category_permanent') {
                 newCategory = 'permanent';
               }
@@ -7868,6 +7879,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .setStyle(newCategory === 'cosmetics' ? ButtonStyle.Primary : ButtonStyle.Secondary)
                 .setEmoji('🎨');
 
+              const updatedConsumablesButton = new ButtonBuilder()
+                .setCustomId('shop_category_consumables')
+                .setLabel('Consumibles')
+                .setStyle(newCategory === 'consumables' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+                .setEmoji('⛩️');
+
               const updatedPermanentButton = new ButtonBuilder()
                 .setCustomId('shop_category_permanent')
                 .setLabel('Permanentes')
@@ -7875,14 +7892,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .setEmoji('⭐');
 
               const updatedCategoryRow = new ActionRowBuilder()
-                .addComponents(updatedAllButton, updatedBoostsButton, updatedCosmeticsButton, updatedPermanentButton, inventoryButton);
+                .addComponents(updatedAllButton, updatedBoostsButton, updatedCosmeticsButton, updatedConsumablesButton, updatedPermanentButton);
+
+              const updatedInventoryRow = new ActionRowBuilder()
+                .addComponents(inventoryButton);
 
               // Obtener datos actualizados del usuario
               const updatedUserDataForCategory = dataManager.getUser(userId, guildId);
-              
+
               await i.update({
                 embeds: [generateShopEmbed(newCategory, updatedUserDataForCategory)],
-                components: [new ActionRowBuilder().addComponents(generateItemSelectMenu(newCategory)), updatedCategoryRow, closeRow]
+                components: [new ActionRowBuilder().addComponents(generateItemSelectMenu(newCategory)), updatedCategoryRow, updatedInventoryRow, closeRow]
               });
             }
           } catch (error) {
@@ -7914,9 +7934,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
               allButton.setDisabled(true),
               boostsButton.setDisabled(true),
               cosmeticsButton.setDisabled(true),
-              permanentButton.setDisabled(true),
-              inventoryButton.setDisabled(true)
+              consumablesButton.setDisabled(true),
+              permanentButton.setDisabled(true)
             );
+
+          const disabledInventoryRow = new ActionRowBuilder()
+            .addComponents(inventoryButton.setDisabled(true));
 
           const disabledSelectRow = new ActionRowBuilder()
             .addComponents(generateItemSelectMenu(currentCategory).setDisabled(true));
@@ -7924,7 +7947,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const disabledCloseRow = new ActionRowBuilder()
             .addComponents(closeButton.setDisabled(true));
 
-          message.edit({ components: [disabledSelectRow, disabledCategoryRow, disabledCloseRow] }).catch(() => {});
+          message.edit({ components: [disabledSelectRow, disabledCategoryRow, disabledInventoryRow, disabledCloseRow] }).catch(() => {});
         });
 
         console.log(`🏪 ${interaction.user.tag} consultó la tienda`);
@@ -8220,45 +8243,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         if (!userData.inventory || userData.inventory.length === 0) {
-          return interaction.editReply('📦 Tu inventario está vacío. Usa `/tienda ver` para ver los items disponibles.');
+          const emptyEmbed = new EmbedBuilder()
+            .setColor(COLORS.ERROR)
+            .setTitle('⚔️ Inventario del Guerrero')
+            .setDescription('```\n┌─────────────────────────────────┐\n│  Tu inventario está vacío...   │\n│                                 │\n│  🏯 Visita la tienda para      │\n│     adquirir items del dojo     │\n└─────────────────────────────────┘\n```')
+            .addFields({
+              name: '💡 Consejo',
+              value: 'Usa `/tienda ver` para explorar los items disponibles',
+              inline: false
+            })
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+          return interaction.editReply({ embeds: [emptyEmbed] });
         }
 
-        let description = '';
-
-        // Mostrar efectos permanentes activos
-        const permanentItems = userData.inventory
-          .map(inv => Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === inv.itemId))
-          .filter(item => item && item.type === 'permanent' && item.category === 'permanent');
-
-        if (permanentItems.length > 0) {
-          description += '**✨ EFECTOS PERMANENTES ACTIVOS:**\n';
-          for (const item of permanentItems) {
-            if (item.id === 'honor_bonus_permanent') {
-              description += `⭐ +5% Honor en todas las actividades\n`;
-            } else if (item.id === 'inventory_expand') {
-              description += `🎒 +10 Slots de inventario (capacidad aumentada)\n`;
-            }
-          }
-          description += '\n';
-        }
-
-        // Mostrar boosts temporales activos
-        const activeBoosts = userData.activeBoosts || [];
-        if (activeBoosts.length > 0) {
-          description += '**⚡ BOOSTS TEMPORALES ACTIVOS:**\n';
-          for (const boost of activeBoosts) {
-            const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === boost.itemId);
-            if (item) {
-              const timeLeft = Math.max(0, boost.expiresAt - Date.now());
-              const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
-              const minutesLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
-              description += `${item.name} - ${hoursLeft}h ${minutesLeft}m restantes\n`;
-            }
-          }
-          description += '\n';
-        }
-
-        description += '**📦 ITEMS EN INVENTARIO:**\n';
+        // Agrupar items por tipo
         const groupedItems = {};
         for (const invItem of userData.inventory) {
           const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === invItem.itemId);
@@ -8270,72 +8269,98 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
         }
 
-        for (const { item, quantity } of Object.values(groupedItems)) {
-          description += `${item.name}${quantity > 1 ? ` x${quantity}` : ''}\n`;
+        // Separar por categorías
+        const permanentItems = Object.values(groupedItems).filter(({ item }) => item.type === 'permanent' && item.category === 'permanent');
+        const cosmeticItems = Object.values(groupedItems).filter(({ item }) => item.category === 'cosmetics');
+        const consumableItems = Object.values(groupedItems).filter(({ item }) => item.type === 'consumable');
+        const activeBoosts = userData.activeBoosts || [];
+
+        // Construir descripción con diseño samurai
+        let description = '```\n┌─────────────────────────────────┐\n';
+
+        // Sección de Permanentes
+        if (permanentItems.length > 0) {
+          description += '│  ⚡ EFECTOS PERMANENTES         │\n';
+          description += '├─────────────────────────────────┤\n';
+          for (const { item } of permanentItems) {
+            if (item.id === 'honor_bonus_permanent') {
+              description += '│  ⭐ +5% Honor (todas)          │\n';
+            } else if (item.id === 'inventory_expand') {
+              description += '│  🎒 +10 Slots inventario       │\n';
+            }
+          }
+          description += '│                                 │\n';
         }
 
-        // Calcular capacidad del inventario
+        // Sección de Boosts Activos
+        if (activeBoosts.length > 0) {
+          description += '│  🔥 BOOSTS TEMPORALES           │\n';
+          description += '├─────────────────────────────────┤\n';
+          for (const boost of activeBoosts) {
+            const item = Object.values(CONSTANTS.SHOP.ITEMS).find(i => i.id === boost.itemId);
+            if (item) {
+              const timeLeft = Math.max(0, boost.expiresAt - Date.now());
+              const hoursLeft = Math.floor(timeLeft / (60 * 60 * 1000));
+              const minutesLeft = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+              const cleanName = item.name.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim().substring(0, 15);
+              const timeStr = `${hoursLeft}h ${minutesLeft}m`.padEnd(10);
+              description += `│  ${cleanName.padEnd(18)} ${timeStr}│\n`;
+            }
+          }
+          description += '│                                 │\n';
+        }
+
+        // Sección de Cosméticos
+        if (cosmeticItems.length > 0) {
+          description += '│  🎨 COSMÉTICOS                  │\n';
+          description += '├─────────────────────────────────┤\n';
+          const activeCosmetics = dataManager.getActiveCosmetics(interaction.user.id, interaction.guild.id);
+          for (const { item } of cosmeticItems.slice(0, 5)) {
+            let isActive = false;
+            if (item.id.includes('title')) isActive = activeCosmetics.titleId === item.id;
+            else if (item.id.includes('badge')) isActive = activeCosmetics.badgeId === item.id;
+            else if (item.id.includes('color')) isActive = activeCosmetics.colorId === item.id;
+
+            const cleanName = item.name.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim().substring(0, 25);
+            const status = isActive ? '✓' : ' ';
+            description += `│  ${status} ${cleanName.padEnd(28)} │\n`;
+          }
+          if (cosmeticItems.length > 5) {
+            description += `│    ... y ${cosmeticItems.length - 5} más              │\n`;
+          }
+          description += '│                                 │\n';
+        }
+
+        // Sección de Consumibles
+        if (consumableItems.length > 0) {
+          description += '│  🎁 CONSUMIBLES                 │\n';
+          description += '├─────────────────────────────────┤\n';
+          for (const { item, quantity } of consumableItems) {
+            const cleanName = item.name.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim().substring(0, 25);
+            const qtyStr = quantity > 1 ? `x${quantity}` : '';
+            description += `│  ${cleanName.padEnd(27)} ${qtyStr.padStart(4)}│\n`;
+          }
+        }
+
+        // Capacidad del inventario
         const currentSize = userData.inventory.length;
         const maxCapacity = CONSTANTS.getInventoryCapacity(userData);
+        const capacityStr = `${currentSize}/${maxCapacity} slots`;
+        description += '│                                 │\n';
+        description += `│  📊 Capacidad: ${capacityStr.padEnd(17)}│\n`;
+        description += '└─────────────────────────────────┘\n```';
 
         const embed = new EmbedBuilder()
-          .setColor(COLORS.PRIMARY)
-          .setTitle('📦 Tu Inventario')
-          .setDescription(description || 'No tienes items.')
-          .addFields({
-            name: '📊 Capacidad',
-            value: `**${currentSize}/${maxCapacity}** slots utilizados`,
-            inline: true
-          })
-          .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+          .setColor(COLORS.GOLD)
+          .setTitle('⚔️ Inventario del Guerrero')
+          .setDescription(description)
+          .setFooter({ text: '⚡ Usa los botones de abajo para interactuar con tus items' })
           .setTimestamp();
 
-        // Construir botones para la vista directa de /tienda inventario
-        const cosmeticItems = Object.values(groupedItems).map(({ item }) => item).filter(item => item.category === 'cosmetics');
-        const consumableItems = Object.values(groupedItems).filter(({ item }) => item.type === 'consumable');
-
+        // Construir botones con tema samurai
         const rows = [];
 
-        // Botones para cosméticos
-        if (cosmeticItems.length > 0) {
-          let currentRow = new ActionRowBuilder();
-          let buttonCount = 0;
-          for (const cosmetic of cosmeticItems) {
-            // Limpiar TODOS los emojis usando regex completa
-            const cleanName = cosmetic.name
-              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '') // Emojis Unicode
-              .replace(/[\u{2600}-\u{26FF}]/gu, '')   // Símbolos variados
-              .replace(/[\u{2700}-\u{27BF}]/gu, '')   // Dingbats
-              .trim();
-
-            // Validar que el nombre no esté vacío
-            if (!cleanName || cleanName.length === 0) {
-              console.error(`❌ ERROR: Cosmético ${cosmetic.id} tiene nombre vacío en inventario`);
-              continue;
-            }
-
-            const activeCosmetics = dataManager.getActiveCosmetics(interaction.user.id, interaction.guild.id);
-            let isActive = false;
-            if (cosmetic.id.includes('title')) isActive = activeCosmetics.titleId === cosmetic.id;
-            else if (cosmetic.id.includes('badge')) isActive = activeCosmetics.badgeId === cosmetic.id;
-            else if (cosmetic.id.includes('color')) isActive = activeCosmetics.colorId === cosmetic.id;
-
-            // Truncar a 80 caracteres
-            const safeLabel = `${isActive ? '✅ ' : ''}${cleanName}`.substring(0, 80);
-
-            const button = new ButtonBuilder()
-              .setCustomId(`activate_cosmetic_${cosmetic.id}`)
-              .setLabel(safeLabel)
-              .setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Primary);
-
-            currentRow.addComponents(button);
-            buttonCount++;
-            if (buttonCount === 5) { rows.push(currentRow); currentRow = new ActionRowBuilder(); buttonCount = 0; }
-          }
-          if (buttonCount > 0) rows.push(currentRow);
-        }
-
-        // Botones para items consumibles
+        // Botones para consumibles (primero, para acceso rápido)
         if (consumableItems.length > 0) {
           let currentRow = new ActionRowBuilder();
           let buttonCount = 0;
@@ -8351,13 +8376,60 @@ client.on(Events.InteractionCreate, async (interaction) => {
               continue;
             }
 
-            const safeLabel = `Usar: ${cleanName}${quantity > 1 ? ` (${quantity})` : ''}`.substring(0, 80);
+            // Emojis samurai según el tipo de consumible
+            const samuraiEmoji = item.id === 'extra_daily_claim' ? '⛩️' : '🎴';
+            const safeLabel = `${cleanName}${quantity > 1 ? ` (${quantity})` : ''}`.substring(0, 75);
 
             const button = new ButtonBuilder()
               .setCustomId(`use_consumable_${item.id}`)
               .setLabel(safeLabel)
-              .setStyle(ButtonStyle.Success)
-              .setEmoji('🎁');
+              .setStyle(ButtonStyle.Danger)
+              .setEmoji(samuraiEmoji);
+
+            currentRow.addComponents(button);
+            buttonCount++;
+            if (buttonCount === 5) { rows.push(currentRow); currentRow = new ActionRowBuilder(); buttonCount = 0; }
+          }
+          if (buttonCount > 0) rows.push(currentRow);
+        }
+
+        // Botones para cosméticos
+        const cosmeticItems_filtered = Object.values(groupedItems).map(({ item }) => item).filter(item => item.category === 'cosmetics');
+        if (cosmeticItems_filtered.length > 0) {
+          let currentRow = new ActionRowBuilder();
+          let buttonCount = 0;
+          for (const cosmetic of cosmeticItems_filtered) {
+            const cleanName = cosmetic.name
+              .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+              .replace(/[\u{2600}-\u{26FF}]/gu, '')
+              .replace(/[\u{2700}-\u{27BF}]/gu, '')
+              .trim();
+
+            if (!cleanName || cleanName.length === 0) {
+              console.error(`❌ ERROR: Cosmético ${cosmetic.id} tiene nombre vacío en inventario`);
+              continue;
+            }
+
+            const activeCosmetics = dataManager.getActiveCosmetics(interaction.user.id, interaction.guild.id);
+            let isActive = false;
+            if (cosmetic.id.includes('title')) isActive = activeCosmetics.titleId === cosmetic.id;
+            else if (cosmetic.id.includes('badge')) isActive = activeCosmetics.badgeId === cosmetic.id;
+            else if (cosmetic.id.includes('color')) isActive = activeCosmetics.colorId === cosmetic.id;
+
+            // Emojis samurai según el tipo
+            let samuraiEmoji = '🎨';
+            if (cosmetic.id.includes('title')) samuraiEmoji = '⚔️';
+            else if (cosmetic.id.includes('badge')) samuraiEmoji = '🏯';
+            else if (cosmetic.id.includes('color')) samuraiEmoji = '🌸';
+
+            const prefix = isActive ? '✓ ' : '';
+            const safeLabel = `${prefix}${cleanName}`.substring(0, 75);
+
+            const button = new ButtonBuilder()
+              .setCustomId(`activate_cosmetic_${cosmetic.id}`)
+              .setLabel(safeLabel)
+              .setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Secondary)
+              .setEmoji(samuraiEmoji);
 
             currentRow.addComponents(button);
             buttonCount++;
