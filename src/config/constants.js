@@ -387,6 +387,106 @@ const CONSTANTS = {
     }
   },
 
+  // ==================== SISTEMA DE ARENA (COMBATE VS IA) ====================
+  ARENA: {
+    // Niveles de dificultad
+    DIFFICULTIES: {
+      RONIN: {
+        id: 'ronin',
+        name: 'Tierras Ronin',
+        emoji: '🥋',
+        description: 'Enemigos principiantes - Ideal para entrenar',
+        entryCost: 50,
+        aiLevel: 1,
+        rewards: {
+          koku: { min: 100, max: 200 },
+          honor: { min: 5, max: 10 },
+          consumableChance: 0.20  // 20% chance de drop
+        },
+        aiStats: {
+          hpMultiplier: 0.8,      // 80% HP normal
+          damageMultiplier: 0.7,  // 70% daño normal
+          weapon: null,
+          armor: null,
+          aggressiveness: 0.3     // 30% chance de usar habilidades
+        }
+      },
+      SAMURAI: {
+        id: 'samurai',
+        name: 'Tierras Samurai',
+        emoji: '⚔️',
+        description: 'Guerreros entrenados - Requiere equipamiento básico',
+        entryCost: 100,
+        aiLevel: 2,
+        rewards: {
+          koku: { min: 200, max: 400 },
+          honor: { min: 15, max: 25 },
+          consumableChance: 0.35
+        },
+        aiStats: {
+          hpMultiplier: 1.0,      // HP normal
+          damageMultiplier: 1.0,  // Daño normal
+          weapon: 'wooden_katana',
+          armor: 'apprentice_gi',
+          aggressiveness: 0.5
+        }
+      },
+      DAIMYO: {
+        id: 'daimyo',
+        name: 'Tierras Daimyo',
+        emoji: '👑',
+        description: 'Maestros del combate - Requiere buen equipamiento',
+        entryCost: 150,
+        aiLevel: 3,
+        rewards: {
+          koku: { min: 400, max: 700 },
+          honor: { min: 30, max: 45 },
+          consumableChance: 0.50
+        },
+        aiStats: {
+          hpMultiplier: 1.3,      // 130% HP
+          damageMultiplier: 1.2,  // 120% daño
+          weapon: 'steel_katana',
+          armor: 'daimyo_armor',
+          aggressiveness: 0.7,
+          skills: ['flame_slash']  // Tiene habilidad
+        }
+      },
+      SHOGUN: {
+        id: 'shogun',
+        name: 'Tierras Shogun',
+        emoji: '🏯',
+        description: 'BOSS FINAL - Solo para guerreros legendarios',
+        entryCost: 200,
+        aiLevel: 4,
+        rewards: {
+          koku: { min: 700, max: 1200 },
+          honor: { min: 50, max: 80 },
+          consumableChance: 0.80
+        },
+        aiStats: {
+          hpMultiplier: 1.5,      // 150% HP
+          damageMultiplier: 1.4,  // 140% daño
+          weapon: 'legendary_katana',
+          armor: 'shogun_armor',
+          aggressiveness: 0.9,
+          skills: ['flame_slash', 'tempest_dance'],
+          training: {             // IA tiene entrenamientos
+            strength: 10,
+            agility: 5,
+            vitality: 10
+          }
+        }
+      }
+    },
+
+    // Cooldown de arena
+    COOLDOWN: 300,  // 5 minutos entre batallas
+
+    // Drops de consumibles posibles
+    CONSUMABLE_DROPS: ['healing_tea', 'warrior_elixir', 'precision_charm', 'ki_potion']
+  },
+
   // ==================== SISTEMA DE ENTRENAMIENTOS ====================
   TRAINING: {
     // Límites de entrenamiento
@@ -1174,6 +1274,7 @@ Object.freeze(CONSTANTS.LEADERBOARDS);
 Object.freeze(CONSTANTS.VALIDATION);
 Object.freeze(CONSTANTS.DUELS);
 Object.freeze(CONSTANTS.COMBAT);
+Object.freeze(CONSTANTS.ARENA);
 Object.freeze(CONSTANTS.TRAINING);
 Object.freeze(CONSTANTS.FORTUNE);
 Object.freeze(CONSTANTS.TRANSLATION);

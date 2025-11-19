@@ -14,6 +14,171 @@ class CombatManager {
   }
 
   /**
+   * Crear oponente IA basado en dificultad de arena
+   * @param {string} difficulty - ID de dificultad ('ronin', 'samurai', 'daimyo', 'shogun')
+   * @returns {Object} - Datos del oponente IA
+   */
+  createAIOpponent(difficulty) {
+    const difficultyData = CONSTANTS.ARENA.DIFFICULTIES[difficulty.toUpperCase()];
+    if (!difficultyData) {
+      throw new Error('Dificultad inválida');
+    }
+
+    const aiStats = difficultyData.aiStats;
+
+    // Crear userData falso para la IA
+    const aiUserData = {
+      userId: `AI_${difficulty}_${Date.now()}`,
+      username: `Guerrero ${difficultyData.name}`,
+      isAI: true,
+      difficulty: difficulty,
+      combat: {
+        equipment: {
+          weapon: aiStats.weapon,
+          armor: aiStats.armor
+        },
+        skills: aiStats.skills || [],
+        training: aiStats.training || {
+          strength: 0,
+          agility: 0,
+          ki_mastery: 0,
+          vitality: 0
+        },
+        consumables: []
+      }
+    };
+
+    return aiUserData;
+  }
+
+  /**
+   * Iniciar combate vs IA en la Arena
+   * @param {Object} player - Datos del jugador
+   * @param {string} difficulty - Dificultad ('ronin', 'samurai', 'daimyo', 'shogun')
+   * @returns {string} - ID del combate
+   */
+  createArenaBattle(player, difficulty) {
+    const aiOpponent = this.createAIOpponent(difficulty);
+    const duelId = `arena_${player.userId}_${difficulty}_${Date.now()}`;
+
+    // Calcular stats del jugador
+    const playerStats = this.calculateCombatStats(player);
+
+    // Calcular stats de la IA
+    let aiStats = this.calculateCombatStats(aiOpponent);
+
+    // Aplicar multiplicadores de dificultad
+    const difficultyData = CONSTANTS.ARENA.DIFFICULTIES[difficulty.toUpperCase()];
+    aiStats.maxHP = Math.floor(aiStats.maxHP * difficultyData.aiStats.hpMultiplier);
+    aiStats.damageBonus = Math.floor(aiStats.damageBonus * difficultyData.aiStats.damageMultiplier);
+    aiStats.damageMultiplier *= difficultyData.aiStats.damageMultiplier;
+
+    const combatState = {
+      duelId,
+      isArenaBattle: true,
+      difficulty: difficulty,
+      turn: 1,
+      currentPlayer: 'challenger', // Jugador siempre empieza
+
+      // Estado del jugador
+      challenger: {
+        userId: player.userId,
+        userData: player,
+        hp: playerStats.maxHP,
+        maxHP: playerStats.maxHP,
+        ki: playerStats.maxKi,
+        maxKi: playerStats.maxKi,
+        stats: playerStats,
+        defending: false,
+        effects: [],
+        skillCooldowns: {},
+        skillUsesRemaining: {}
+      },
+
+      // Estado de la IA
+      opponent: {
+        userId: aiOpponent.userId,
+        userData: aiOpponent,
+        isAI: true,
+        hp: aiStats.maxHP,
+        maxHP: aiStats.maxHP,
+        ki: aiStats.maxKi,
+        maxKi: aiStats.maxKi,
+        stats: aiStats,
+        defending: false,
+        effects: [],
+        skillCooldowns: {},
+        skillUsesRemaining: {},
+        aggressiveness: difficultyData.aiStats.aggressiveness
+      },
+
+      combatLog: [],
+      startTime: Date.now()
+    };
+
+    // Inicializar usos de habilidades
+    this.initializeSkillUses(combatState.challenger);
+    this.initializeSkillUses(combatState.opponent);
+
+    this.activeDuels.set(duelId, combatState);
+    return duelId;
+  }
+
+  /**
+   * IA toma una decisión de combate
+   * @param {Object} duel - Estado del duelo
+   * @returns {Object} - Acción decidida { actionType, actionData }
+   */
+  aiDecideAction(duel) {
+    const ai = duel.opponent;
+    const player = duel.challenger;
+
+    // Determinar si la IA está en peligro (HP bajo)
+    const hpPercent = ai.hp / ai.maxHP;
+    const isDangerous = hpPercent < 0.3;
+
+    // Si HP muy bajo y tiene té medicinal, usarlo
+    if (isDangerous && ai.ki >= 1) {
+      // 70% chance de defender cuando está en peligro
+      if (Math.random() < 0.7) {
+        return { actionType: 'defend', actionData: {} };
+      }
+    }
+
+    // Intentar usar habilidades si tiene Ki y según agresividad
+    if (ai.userData.combat.skills && ai.userData.combat.skills.length > 0 && Math.random() < ai.aggressiveness) {
+      for (const skillId of ai.userData.combat.skills) {
+        // Verificar cooldown
+        if (ai.skillCooldowns[skillId] && ai.skillCooldowns[skillId] > 0) continue;
+
+        // Verificar usos restantes
+        const skill = CONSTANTS.COMBAT.SKILLS[skillId.toUpperCase()];
+        if (skill.usesPerDuel && ai.skillUsesRemaining[skillId] <= 0) continue;
+
+        // Verificar Ki
+        if (ai.ki >= skill.kiCost) {
+          return { actionType: 'skill', actionData: { skillId } };
+        }
+      }
+    }
+
+    // Estrategia basada en Ki disponible
+    if (ai.ki >= 3 && Math.random() < 0.4) {
+      // 40% chance de golpe crítico si tiene 3 Ki
+      return { actionType: 'critical_strike', actionData: {} };
+    } else if (ai.ki >= 2 && Math.random() < 0.6) {
+      // 60% chance de ataque pesado si tiene 2 Ki
+      return { actionType: 'heavy_attack', actionData: {} };
+    } else if (ai.ki >= 1) {
+      // Ataque rápido si tiene al menos 1 Ki
+      return { actionType: 'light_attack', actionData: {} };
+    } else {
+      // Sin Ki, defender
+      return { actionType: 'defend', actionData: {} };
+    }
+  }
+
+  /**
    * Iniciar un nuevo duelo
    * @param {Object} challenger - Datos del retador
    * @param {Object} opponent - Datos del oponente
