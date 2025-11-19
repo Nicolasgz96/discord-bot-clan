@@ -9146,6 +9146,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
               return;
             }
 
+            // Mostrar resultado del ataque del jugador
+            const updatedEmbed = combatManager.generateCombatEmbed(updatedDuel);
+            updatedEmbed.addFields({
+              name: '⚔️ Tu acción',
+              value: result.message,
+              inline: false
+            });
+
             // Turno de la IA (con delay de 2 segundos para dar tiempo al jugador)
             await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -9156,6 +9164,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             if (aiResult.gameOver) {
               const finalEmbed = combatManager.generateCombatEmbed(duelAfterAI);
+              finalEmbed.addFields({
+                name: '⚔️ Tu acción',
+                value: result.message,
+                inline: false
+              });
+              finalEmbed.addFields({
+                name: '🤖 Acción del oponente',
+                value: aiResult.message,
+                inline: false
+              });
               finalEmbed.addFields({
                 name: aiResult.winner === 'challenger' ? '🎉 ¡VICTORIA!' : '💀 DERROTA',
                 value: aiResult.reason,
@@ -9197,9 +9215,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
               return;
             }
 
-            const updatedEmbed = combatManager.generateCombatEmbed(duelAfterAI);
+            // Mostrar resultado del ataque de la IA
+            const finalUpdatedEmbed = combatManager.generateCombatEmbed(duelAfterAI);
+            finalUpdatedEmbed.addFields({
+              name: '⚔️ Tu acción',
+              value: result.message,
+              inline: false
+            });
+            finalUpdatedEmbed.addFields({
+              name: '🤖 Acción del oponente',
+              value: aiResult.message,
+              inline: false
+            });
+
             const updatedButtons = combatManager.generateCombatButtons(duelAfterAI.challenger);
-            await btnInteraction.editReply({ embeds: [updatedEmbed], components: updatedButtons });
+            await btnInteraction.editReply({ embeds: [finalUpdatedEmbed], components: updatedButtons });
           });
 
           combatCollector.on('end', async (collected, reason) => {
