@@ -177,7 +177,8 @@ const CONSTANTS = {
   COMBAT: {
     // Stats base
     BASE_HP: 100,                            // HP inicial
-    BASE_KI: 3,                              // Ki (energía) por turno
+    BASE_KI: 3,                              // Ki máximo base
+    KI_REGEN_PER_TURN: 1,                    // Ki que se regenera por turno
     MAX_TURNS: 20,                           // Turnos máximos antes de empate
 
     // Tipos de acciones en combate
@@ -547,8 +548,6 @@ const CONSTANTS = {
     CATEGORIES: {
       BOOSTS: 'boosts',
       COSMETICS: 'cosmetics',
-      CONSUMABLES: 'consumables',
-      PERMANENT: 'permanent'
       PERMANENT: 'permanent',
       WEAPONS: 'weapons',              // Armas de combate
       ARMOR: 'armor',                  // Armaduras

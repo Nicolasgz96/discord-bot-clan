@@ -343,8 +343,8 @@ class CombatManager {
     // Reducir cooldowns
     this.updateCooldowns(attacker);
 
-    // Regenerar Ki al inicio del turno
-    attacker.ki = Math.min(attacker.ki + attacker.maxKi, attacker.maxKi);
+    // Regenerar Ki al inicio del turno (solo 1 punto por turno)
+    attacker.ki = Math.min(attacker.ki + CONSTANTS.COMBAT.KI_REGEN_PER_TURN, attacker.maxKi);
 
     // Agregar al log
     duel.combatLog.push({
