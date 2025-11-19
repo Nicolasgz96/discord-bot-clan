@@ -9076,6 +9076,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await i.editReply({ embeds: [combatEmbed], components: buttons });
 
+          // Guardar referencia a la última interacción para poder editar al expirar
+          let lastInteraction = i;
+
           // Collector para acciones de combate
           const combatCollector = message.createMessageComponentCollector({
             filter: (btnI) => btnI.user.id === userId,
@@ -9086,6 +9089,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (!btnInteraction.customId.startsWith('combat_')) return;
 
             await btnInteraction.deferUpdate();
+            lastInteraction = btnInteraction; // Actualizar última interacción
 
             const actionType = btnInteraction.customId.replace('combat_', '');
             const result = combatManager.processAction(duelId, userId, actionType, {});
@@ -9263,7 +9267,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 }
 
                 try {
-                  await message.edit({ embeds: [finalEmbed], components: [] });
+                  await lastInteraction.editReply({ embeds: [finalEmbed], components: [] });
                 } catch (error) {
                   console.log('⚠️ No se pudo editar el mensaje final del combate:', error.message);
                 }
