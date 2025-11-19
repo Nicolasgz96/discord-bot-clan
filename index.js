@@ -1640,7 +1640,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // ========== COMBATE Y JUEGOS ==========
           {
             name: `${EMOJIS.DUEL} __COMBATE Y JUEGOS__`,
-            value: `⚔️ \`/duelo @usuario\` - Desafía a un duelo de honor\n📜 \`/sabiduria\` - Citas de maestros samurai\n🎴 \`/fortuna\` - Omikuji (fortuna diaria)\n👤 \`/perfil [@usuario]\` - Ver perfil completo de guerrero\n📍 *${combatChannelName}*`,
+            value: `⚔️ \`/duelo @usuario\` - Desafía a un duelo de honor\n🏟️ \`/arena [dificultad]\` - Combate vs IA en la arena\n💪 \`/entrenar [tipo]\` - Mejora tus stats de combate\n📦 \`/tienda inventario\` - Ver tu inventario de items\n📍 *${combatChannelName}*`,
+            inline: false
+          },
+          {
+            name: `${EMOJIS.DUEL} __COMBATE Y JUEGOS (CONT.)__`,
+            value: `📜 \`/sabiduria\` - Citas de maestros samurai\n🎴 \`/fortuna\` - Omikuji (fortuna diaria)\n👤 \`/perfil [@usuario]\` - Ver perfil completo de guerrero\n📍 *${combatChannelName}*`,
             inline: false
           },
           // ========== PERSONALIZACIÓN ==========
