@@ -295,6 +295,61 @@ const commands = [
         .setDescription('Ver tu inventario de items comprados')
     ),
 
+  // SISTEMA DE ARENA (COMBATE VS IA)
+  new SlashCommandBuilder()
+    .setName('arena')
+    .setDescription('⚔️ Entra a la Arena Samurái y combate contra guerreros IA')
+    .addStringOption(option =>
+      option
+        .setName('dificultad')
+        .setDescription('Nivel de dificultad del enemigo (opcional, muestra dropdown si no se especifica)')
+        .setRequired(false)
+        .addChoices(
+          { name: '🥋 Tierras Ronin (Fácil)', value: 'ronin' },
+          { name: '⚔️ Tierras Samurai (Normal)', value: 'samurai' },
+          { name: '👑 Tierras Daimyo (Difícil)', value: 'daimyo' },
+          { name: '🏯 Tierras Shogun (EXTREMO)', value: 'shogun' }
+        )
+    ),
+
+  // SISTEMA DE ENTRENAMIENTOS
+  new SlashCommandBuilder()
+    .setName('entrenar')
+    .setDescription('💪 Entrena tus stats de combate permanentemente')
+    .addStringOption(option =>
+      option
+        .setName('stat')
+        .setDescription('Stat a entrenar (opcional, muestra dropdown si no se especifica)')
+        .setRequired(false)
+        .addChoices(
+          { name: '💪 Fuerza (+1% daño)', value: 'strength' },
+          { name: '🏃 Agilidad (+2% evasión)', value: 'agility' },
+          { name: '🧘 Meditación Ki (+1 Ki máximo)', value: 'ki_mastery' },
+          { name: '❤️ Resistencia (+5 HP)', value: 'vitality' }
+        )
+    ),
+
+  // SISTEMA DE EQUIPAMIENTO
+  new SlashCommandBuilder()
+    .setName('equipar')
+    .setDescription('⚔️ Equipa o desequipa armas y armaduras')
+    .addStringOption(option =>
+      option
+        .setName('tipo')
+        .setDescription('Tipo de equipamiento')
+        .setRequired(true)
+        .addChoices(
+          { name: '⚔️ Arma', value: 'weapon' },
+          { name: '🛡️ Armadura', value: 'armor' }
+        )
+    )
+    .addStringOption(option =>
+      option
+        .setName('item')
+        .setDescription('Item a equipar (deja vacío para ver opciones)')
+        .setRequired(false)
+    ),
+
   new SlashCommandBuilder()
     .setName('purge')
     .setDescription('🧹 Ejecuta la purga manualmente (solo propietario)')
