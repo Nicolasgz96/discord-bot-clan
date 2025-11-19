@@ -302,8 +302,8 @@ const commands = [
     .addStringOption(option =>
       option
         .setName('dificultad')
-        .setDescription('Nivel de dificultad del enemigo')
-        .setRequired(true)
+        .setDescription('Nivel de dificultad del enemigo (opcional, muestra dropdown si no se especifica)')
+        .setRequired(false)
         .addChoices(
           { name: '🥋 Tierras Ronin (Fácil)', value: 'ronin' },
           { name: '⚔️ Tierras Samurai (Normal)', value: 'samurai' },
@@ -319,8 +319,8 @@ const commands = [
     .addStringOption(option =>
       option
         .setName('stat')
-        .setDescription('Stat a entrenar')
-        .setRequired(true)
+        .setDescription('Stat a entrenar (opcional, muestra dropdown si no se especifica)')
+        .setRequired(false)
         .addChoices(
           { name: '💪 Fuerza (+1% daño)', value: 'strength' },
           { name: '🏃 Agilidad (+2% evasión)', value: 'agility' },
