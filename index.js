@@ -7407,12 +7407,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setStyle(ButtonStyle.Secondary)
           .setEmoji('🔥');
 
-        const consumablesButton = new ButtonBuilder()
-          .setCustomId('shop_category_consumables')
-          .setLabel('Consumibles')
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji('🍵');
-
         const inventoryButton = new ButtonBuilder()
           .setCustomId('shop_view_inventory')
           .setLabel('Mi Inventario')
@@ -8056,7 +8050,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .setStyle(newCategory === 'skills' ? ButtonStyle.Primary : ButtonStyle.Secondary)
                 .setEmoji('🔥');
 
-              const updatedConsumablesButton = new ButtonBuilder()
+              const updatedConsumablesButton2 = new ButtonBuilder()
                 .setCustomId('shop_category_consumables')
                 .setLabel('Consumibles')
                 .setStyle(newCategory === 'consumables' ? ButtonStyle.Primary : ButtonStyle.Secondary)
@@ -8066,14 +8060,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .addComponents(updatedAllButton, updatedBoostsButton, updatedCosmeticsButton, updatedPermanentButton, inventoryButton);
 
               const updatedCategoryRow2 = new ActionRowBuilder()
-                .addComponents(updatedWeaponsButton, updatedArmorButton, updatedSkillsButton, updatedConsumablesButton);
+                .addComponents(updatedWeaponsButton, updatedArmorButton, updatedSkillsButton, updatedConsumablesButton2);
 
               // Obtener datos actualizados del usuario
               const updatedUserDataForCategory = dataManager.getUser(userId, guildId);
 
               await i.update({
                 embeds: [generateShopEmbed(newCategory, updatedUserDataForCategory)],
-                components: [new ActionRowBuilder().addComponents(generateItemSelectMenu(newCategory)), updatedCategoryRow, updatedInventoryRow, closeRow]
                 components: [new ActionRowBuilder().addComponents(generateItemSelectMenu(newCategory)), updatedCategoryRow1, updatedCategoryRow2, closeRow]
               });
             }
@@ -9083,6 +9076,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await i.editReply({ embeds: [combatEmbed], components: buttons });
 
+          // Guardar referencia a la última interacción para poder editar al expirar
+          let lastInteraction = i;
+
           // Collector para acciones de combate
           const combatCollector = message.createMessageComponentCollector({
             filter: (btnI) => btnI.user.id === userId,
@@ -9093,6 +9089,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (!btnInteraction.customId.startsWith('combat_')) return;
 
             await btnInteraction.deferUpdate();
+            lastInteraction = btnInteraction; // Actualizar última interacción
 
             const actionType = btnInteraction.customId.replace('combat_', '');
             const result = combatManager.processAction(duelId, userId, actionType, {});
@@ -9149,7 +9146,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
               return;
             }
 
-            // Turno de la IA
+            // Turno de la IA (con delay de 2 segundos para dar tiempo al jugador)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
             const aiAction = combatManager.aiDecideAction(updatedDuel);
             const aiResult = combatManager.processAction(duelId, updatedDuel.opponent.userId, aiAction.actionType, aiAction.actionData);
 
@@ -9203,8 +9202,77 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await btnInteraction.editReply({ embeds: [updatedEmbed], components: updatedButtons });
           });
 
-          combatCollector.on('end', () => {
-            if (combatManager.getDuel(duelId)) {
+          combatCollector.on('end', async (collected, reason) => {
+            const finalDuel = combatManager.getDuel(duelId);
+
+            if (finalDuel) {
+              // Si el combate termina por timeout, determinar ganador por HP
+              if (reason === 'time') {
+                const challenger = finalDuel.challenger;
+                const opponent = finalDuel.opponent;
+
+                let winner;
+                let winnerName;
+                let resultText;
+
+                if (challenger.hp > opponent.hp) {
+                  winner = 'challenger';
+                  winnerName = '🎉 ¡VICTORIA!';
+                  resultText = `El combate ha finalizado por tiempo. ¡Ganaste con **${challenger.hp}/${challenger.maxHP} HP** restante!`;
+                } else if (opponent.hp > challenger.hp) {
+                  winner = 'opponent';
+                  winnerName = '💀 DERROTA';
+                  resultText = `El combate ha finalizado por tiempo. El oponente ganó con **${opponent.hp}/${opponent.maxHP} HP** restante.`;
+                } else {
+                  winner = null;
+                  winnerName = '⚔️ EMPATE';
+                  resultText = `El combate ha finalizado por tiempo. Ambos tienen **${challenger.hp} HP**. ¡Es un empate!`;
+                }
+
+                const finalEmbed = combatManager.generateCombatEmbed(finalDuel);
+                finalEmbed.addFields({
+                  name: winnerName,
+                  value: resultText,
+                  inline: false
+                });
+
+                // Si ganó el jugador, dar recompensas
+                if (winner === 'challenger') {
+                  const rewards = diffData.rewards;
+                  const kokuReward = Math.floor(Math.random() * (rewards.koku.max - rewards.koku.min + 1)) + rewards.koku.min;
+                  const honorReward = Math.floor(Math.random() * (rewards.honor.max - rewards.honor.min + 1)) + rewards.honor.min;
+
+                  dataManager.addHonor(userId, guildId, honorReward);
+                  userData.koku += kokuReward;
+                  dataManager.updateUser(userId, guildId, { koku: userData.koku });
+
+                  if (!userData.stats.arenaWins) userData.stats.arenaWins = 0;
+                  userData.stats.arenaWins++;
+                  dataManager.updateUser(userId, guildId, { stats: userData.stats });
+
+                  let rewardText = `💰 **${kokuReward} koku**\n⭐ **${honorReward} honor**`;
+
+                  if (Math.random() < rewards.consumableChance) {
+                    const randomConsumable = CONSTANTS.ARENA.CONSUMABLE_DROPS[Math.floor(Math.random() * CONSTANTS.ARENA.CONSUMABLE_DROPS.length)];
+                    dataManager.addConsumable(userId, guildId, randomConsumable, 1);
+                    const itemData = CONSTANTS.SHOP.ITEMS[randomConsumable.toUpperCase()];
+                    rewardText += `\n🎁 **${itemData.name}**`;
+                  }
+
+                  finalEmbed.addFields({
+                    name: '🎁 Recompensas',
+                    value: rewardText,
+                    inline: false
+                  });
+                }
+
+                try {
+                  await lastInteraction.editReply({ embeds: [finalEmbed], components: [] });
+                } catch (error) {
+                  console.log('⚠️ No se pudo editar el mensaje final del combate:', error.message);
+                }
+              }
+
               combatManager.endDuel(duelId);
             }
           });

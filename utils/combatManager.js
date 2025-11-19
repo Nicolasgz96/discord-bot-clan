@@ -343,8 +343,8 @@ class CombatManager {
     // Reducir cooldowns
     this.updateCooldowns(attacker);
 
-    // Regenerar Ki al inicio del turno
-    attacker.ki = Math.min(attacker.ki + attacker.maxKi, attacker.maxKi);
+    // Regenerar Ki al inicio del turno (solo 1 punto por turno)
+    attacker.ki = Math.min(attacker.ki + CONSTANTS.COMBAT.KI_REGEN_PER_TURN, attacker.maxKi);
 
     // Agregar al log
     duel.combatLog.push({
@@ -723,22 +723,37 @@ class CombatManager {
 
     const currentTurnPlayer = duel.currentPlayer === 'challenger' ? challenger : opponent;
 
+    // Determinar nombre del retador (si tiene userData.username lo usa, sino "Retador")
+    const challengerName = challenger.userData?.username || 'Retador';
+    // Determinar nombre del oponente (IA o jugador)
+    const opponentName = opponent.isAI ? opponent.userData.username : (opponent.userData?.username || 'Oponente');
+
     const embed = new EmbedBuilder()
       .setTitle(`⚔️ DUELO SAMURÁI - Turno ${duel.turn}`)
       .setColor('#E74C3C')
       .addFields(
         {
-          name: `${EMOJIS.MEMBER} Retador`,
+          name: `${EMOJIS.MEMBER} ${challengerName}`,
           value: `❤️ HP: ${challengerHPBar} ${challenger.hp}/${challenger.maxHP}\n⚡ Ki: ${'🔷'.repeat(challenger.ki)}${'⬜'.repeat(challenger.maxKi - challenger.ki)} ${challenger.ki}/${challenger.maxKi}`,
           inline: true
         },
         {
-          name: `${EMOJIS.MEMBER} Oponente`,
+          name: `${EMOJIS.MEMBER} ${opponentName}`,
           value: `❤️ HP: ${opponentHPBar} ${opponent.hp}/${opponent.maxHP}\n⚡ Ki: ${'🔷'.repeat(opponent.ki)}${'⬜'.repeat(opponent.maxKi - opponent.ki)} ${opponent.ki}/${opponent.maxKi}`,
           inline: true
         }
-      )
-      .setFooter({ text: `Turno de: ${duel.currentPlayer === 'challenger' ? 'Retador' : 'Oponente'} | Apuesta: ${duel.bet} honor` });
+      );
+
+    // Footer diferente para arena vs duelos normales
+    if (duel.isArenaBattle) {
+      embed.setFooter({
+        text: `Turno de: ${duel.currentPlayer === 'challenger' ? challengerName : opponentName} | Arena: ${duel.difficulty}`
+      });
+    } else {
+      embed.setFooter({
+        text: `Turno de: ${duel.currentPlayer === 'challenger' ? challengerName : opponentName} | Apuesta: ${duel.bet || 0} honor`
+      });
+    }
 
     // Agregar efectos activos
     if (currentTurnPlayer.effects.length > 0) {
