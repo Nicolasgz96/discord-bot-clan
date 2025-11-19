@@ -1507,7 +1507,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   // Comandos que NO requieren estar en el canal de comandos
-  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas'];
+  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'arena', 'entrenar', 'inventario', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas'];
 
   // Verificar si el comando debe ejecutarse en un canal específico
   // (excluir comandos de música y achievements ya que tienen su propia verificación)
@@ -8955,15 +8955,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // ==================== SISTEMA DE ARENA (COMBATE VS IA) ====================
 
     else if (commandName === 'arena') {
-      // Verificar que el comando se use en el canal correcto
-      const combatChannelId = '1439009626396823594';
-      if (interaction.channel.id !== combatChannelId) {
-        return interaction.reply({
-          content: `❌ El comando \`/arena\` solo puede usarse en <#${combatChannelId}>.`,
-          flags: MessageFlags.Ephemeral
-        });
-      }
-
       const difficulty = interaction.options.getString('dificultad');
       const userId = interaction.user.id;
       const guildId = interaction.guild.id;
