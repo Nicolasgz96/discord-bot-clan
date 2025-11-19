@@ -196,7 +196,22 @@ class DataManager {
           colorId: null
         },
         inventory: [],
-        activeBoosts: []
+        activeBoosts: [],
+        // Sistema de combate
+        combat: {
+          equipment: {
+            weapon: null,          // ID del arma equipada
+            armor: null            // ID de la armadura equipada
+          },
+          skills: [],              // Array de IDs de habilidades desbloqueadas
+          training: {
+            strength: 0,           // Nivel de entrenamiento de fuerza
+            agility: 0,            // Nivel de entrenamiento de agilidad
+            ki_mastery: 0,         // Nivel de meditación de Ki
+            vitality: 0            // Nivel de entrenamiento de resistencia
+          },
+          consumables: []          // Array de consumibles de combate {itemId, quantity}
+        }
       };
       this.dataModified.users = true;
     } else {
@@ -220,6 +235,25 @@ class DataManager {
 
       if (!user.activeBoosts) {
         user.activeBoosts = [];
+        modified = true;
+      }
+
+      // Migración: Sistema de combate
+      if (!user.combat) {
+        user.combat = {
+          equipment: {
+            weapon: null,
+            armor: null
+          },
+          skills: [],
+          training: {
+            strength: 0,
+            agility: 0,
+            ki_mastery: 0,
+            vitality: 0
+          },
+          consumables: []
+        };
         modified = true;
       }
 
@@ -879,6 +913,201 @@ class DataManager {
     await this.saveBotConfig();
 
     console.log(`${EMOJIS.SUCCESS} Todos los datos guardados exitosamente`);
+  }
+
+  // ==================== SISTEMA DE COMBATE ====================
+
+  /**
+   * Equipar un item (arma o armadura)
+   * @param {string} userId - ID del usuario
+   * @param {string} guildId - ID del servidor
+   * @param {string} itemId - ID del item a equipar
+   * @param {string} slot - 'weapon' o 'armor'
+   * @returns {boolean} - True si se equipó correctamente
+   */
+  equipItem(userId, guildId, itemId, slot) {
+    const user = this.getUser(userId, guildId);
+
+    if (!user.combat) {
+      user.combat = {
+        equipment: { weapon: null, armor: null },
+        skills: [],
+        training: { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 },
+        consumables: []
+      };
+    }
+
+    // Verificar que el usuario posee el item en su inventario
+    const hasItem = user.inventory.some(inv => inv.itemId === itemId);
+    if (!hasItem && itemId !== 'none') {
+      return false;
+    }
+
+    // Equipar el item
+    user.combat.equipment[slot] = itemId === 'none' ? null : itemId;
+    this.dataModified.users = true;
+
+    return true;
+  }
+
+  /**
+   * Comprar una habilidad de combate
+   * @param {string} userId - ID del usuario
+   * @param {string} guildId - ID del servidor
+   * @param {string} skillId - ID de la habilidad
+   * @returns {boolean} - True si se compró correctamente
+   */
+  purchaseSkill(userId, guildId, skillId) {
+    const user = this.getUser(userId, guildId);
+
+    if (!user.combat) {
+      user.combat = {
+        equipment: { weapon: null, armor: null },
+        skills: [],
+        training: { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 },
+        consumables: []
+      };
+    }
+
+    // Verificar que no tenga ya la habilidad
+    if (user.combat.skills.includes(skillId)) {
+      return false;
+    }
+
+    // Agregar habilidad
+    user.combat.skills.push(skillId);
+    this.dataModified.users = true;
+
+    return true;
+  }
+
+  /**
+   * Entrenar un stat
+   * @param {string} userId - ID del usuario
+   * @param {string} guildId - ID del servidor
+   * @param {string} statType - Tipo de stat (strength, agility, ki_mastery, vitality)
+   * @returns {Object} - { success: boolean, newLevel: number, message: string }
+   */
+  trainStat(userId, guildId, statType) {
+    const user = this.getUser(userId, guildId);
+
+    if (!user.combat) {
+      user.combat = {
+        equipment: { weapon: null, armor: null },
+        skills: [],
+        training: { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 },
+        consumables: []
+      };
+    }
+
+    const training = CONSTANTS.TRAINING.TYPES[statType.toUpperCase()];
+    if (!training) {
+      return { success: false, newLevel: 0, message: 'Tipo de entrenamiento inválido' };
+    }
+
+    const currentLevel = user.combat.training[statType] || 0;
+
+    // Verificar nivel máximo
+    if (currentLevel >= training.maxLevel) {
+      return { success: false, newLevel: currentLevel, message: `Ya alcanzaste el nivel máximo (${training.maxLevel})` };
+    }
+
+    // Incrementar nivel
+    user.combat.training[statType] = currentLevel + 1;
+    this.dataModified.users = true;
+
+    return { success: true, newLevel: currentLevel + 1, message: 'Entrenamiento completado' };
+  }
+
+  /**
+   * Agregar consumibles de combate al inventario
+   * @param {string} userId - ID del usuario
+   * @param {string} guildId - ID del servidor
+   * @param {string} itemId - ID del consumible
+   * @param {number} quantity - Cantidad a agregar
+   */
+  addConsumable(userId, guildId, itemId, quantity = 1) {
+    const user = this.getUser(userId, guildId);
+
+    if (!user.combat) {
+      user.combat = {
+        equipment: { weapon: null, armor: null },
+        skills: [],
+        training: { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 },
+        consumables: []
+      };
+    }
+
+    // Buscar si ya tiene el consumible
+    const existingItem = user.combat.consumables.find(c => c.itemId === itemId);
+
+    if (existingItem) {
+      existingItem.quantity += quantity;
+    } else {
+      user.combat.consumables.push({ itemId, quantity });
+    }
+
+    this.dataModified.users = true;
+  }
+
+  /**
+   * Usar un consumible de combate
+   * @param {string} userId - ID del usuario
+   * @param {string} guildId - ID del servidor
+   * @param {string} itemId - ID del consumible
+   * @returns {boolean} - True si se usó correctamente
+   */
+  useConsumable(userId, guildId, itemId) {
+    const user = this.getUser(userId, guildId);
+
+    if (!user.combat || !user.combat.consumables) {
+      return false;
+    }
+
+    const consumable = user.combat.consumables.find(c => c.itemId === itemId);
+
+    if (!consumable || consumable.quantity <= 0) {
+      return false;
+    }
+
+    // Reducir cantidad
+    consumable.quantity -= 1;
+
+    // Eliminar si llegó a 0
+    if (consumable.quantity === 0) {
+      user.combat.consumables = user.combat.consumables.filter(c => c.itemId !== itemId);
+    }
+
+    this.dataModified.users = true;
+    return true;
+  }
+
+  /**
+   * Obtener stats de combate calculados de un usuario
+   * @param {string} userId - ID del usuario
+   * @param {string} guildId - ID del servidor
+   * @returns {Object} - Stats de combate { maxHP, maxKi, damageBonus, damageMultiplier, evasionChance }
+   */
+  getCombatStats(userId, guildId) {
+    const user = this.getUser(userId, guildId);
+
+    if (!user.combat) {
+      user.combat = {
+        equipment: { weapon: null, armor: null },
+        skills: [],
+        training: { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 },
+        consumables: []
+      };
+    }
+
+    return {
+      maxHP: CONSTANTS.calculateMaxHP(user.combat),
+      maxKi: CONSTANTS.calculateMaxKi(user.combat),
+      damageBonus: CONSTANTS.calculateDamageBonus(user.combat),
+      damageMultiplier: CONSTANTS.calculateDamageMultiplier(user.combat),
+      evasionChance: CONSTANTS.calculateEvasionChance(user.combat),
+      duelRank: CONSTANTS.getDuelRank(user.stats.duelsWon || 0)
+    };
   }
 
   /**
