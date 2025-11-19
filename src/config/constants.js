@@ -162,12 +162,379 @@ const CONSTANTS = {
     MAX_BET: 500,                            // Apuesta máxima de honor
     COOLDOWN: 60,                            // Cooldown en segundos
     INVITE_TIMEOUT: 30,                      // Tiempo de espera para aceptar duelo (segundos)
+    TURN_TIMEOUT: 45,                        // Segundos para elegir acción en turno
 
-    // Mecánica de combate (piedra, papel, tijera samurai)
+    // Rankings de duelo (basado en victorias)
+    RANKS: {
+      NOVATO: { min: 0, max: 9, name: 'Novato', emoji: '🥋', color: '#95A5A6' },
+      EXPERTO: { min: 10, max: 29, name: 'Experto', emoji: '⚔️', color: '#3498DB' },
+      MAESTRO: { min: 30, max: 99, name: 'Maestro', emoji: '👺', color: '#E74C3C' },
+      LEYENDA: { min: 100, max: Infinity, name: 'Leyenda', emoji: '🏯', color: '#F39C12' }
+    }
+  },
+
+  // ==================== SISTEMA DE COMBATE ====================
+  COMBAT: {
+    // Stats base
+    BASE_HP: 100,                            // HP inicial
+    BASE_KI: 3,                              // Ki máximo base
+    KI_REGEN_PER_TURN: 1,                    // Ki que se regenera por turno
+    MAX_TURNS: 20,                           // Turnos máximos antes de empate
+
+    // Tipos de acciones en combate
+    ACTIONS: {
+      LIGHT_ATTACK: {
+        id: 'light_attack',
+        name: 'Ataque Rápido',
+        emoji: '⚡',
+        kiCost: 1,
+        damage: { min: 15, max: 25 },
+        accuracy: 0.80,                      // 80% de acierto
+        description: 'Ataque veloz con buena precisión'
+      },
+      HEAVY_ATTACK: {
+        id: 'heavy_attack',
+        name: 'Ataque Pesado',
+        emoji: '💥',
+        kiCost: 2,
+        damage: { min: 30, max: 45 },
+        accuracy: 0.60,                      // 60% de acierto
+        description: 'Ataque poderoso pero menos preciso'
+      },
+      CRITICAL_STRIKE: {
+        id: 'critical_strike',
+        name: 'Golpe Crítico',
+        emoji: '💢',
+        kiCost: 3,
+        damage: { min: 50, max: 70 },
+        accuracy: 0.40,                      // 40% de acierto
+        description: 'Golpe devastador de alto riesgo'
+      },
+      DEFEND: {
+        id: 'defend',
+        name: 'Defender',
+        emoji: '🛡️',
+        kiCost: 0,
+        damageReduction: 0.50,               // Reduce 50% daño próximo turno
+        description: 'Postura defensiva para mitigar daño'
+      },
+      COUNTER: {
+        id: 'counter',
+        name: 'Contraataque',
+        emoji: '⚔️',
+        kiCost: 2,
+        counterMultiplier: 1.5,              // Devuelve 150% del daño bloqueado
+        successChance: 0.50,                 // 50% de éxito
+        description: 'Bloquea y contraataca si tienes éxito'
+      }
+    },
+
+    // Armas disponibles (equipables, se compran en tienda)
     WEAPONS: {
-      KATANA: { name: 'Katana', emoji: '⚔️', beats: 'TANTO' },
-      WAKIZASHI: { name: 'Wakizashi', emoji: '🗡️', beats: 'KATANA' },
-      TANTO: { name: 'Tanto', emoji: '🔪', beats: 'WAKIZASHI' }
+      NONE: {
+        id: 'none',
+        name: 'Sin Arma',
+        emoji: '👊',
+        damageBonus: 0,
+        price: 0,
+        description: 'Combate desarmado'
+      },
+      WOODEN_KATANA: {
+        id: 'wooden_katana',
+        name: 'Katana de Madera',
+        emoji: '🗡️',
+        damageBonus: 5,
+        price: 1000,
+        description: 'Katana de entrenamiento (+5 daño)'
+      },
+      STEEL_KATANA: {
+        id: 'steel_katana',
+        name: 'Katana Forjada',
+        emoji: '⚔️',
+        damageBonus: 10,
+        price: 5000,
+        description: 'Katana de acero templado (+10 daño)'
+      },
+      LEGENDARY_KATANA: {
+        id: 'legendary_katana',
+        name: 'Katana Legendaria',
+        emoji: '🔥',
+        damageBonus: 20,
+        price: 25000,
+        description: 'Obra maestra forjada por un maestro herrero (+20 daño)'
+      }
+    },
+
+    // Armaduras disponibles
+    ARMOR: {
+      NONE: {
+        id: 'none',
+        name: 'Sin Armadura',
+        emoji: '👔',
+        hpBonus: 0,
+        price: 0,
+        description: 'Sin protección'
+      },
+      APPRENTICE_GI: {
+        id: 'apprentice_gi',
+        name: 'Gi del Aprendiz',
+        emoji: '🥋',
+        hpBonus: 10,
+        price: 800,
+        description: 'Vestimenta básica de entrenamiento (+10 HP)'
+      },
+      DAIMYO_ARMOR: {
+        id: 'daimyo_armor',
+        name: 'Armadura del Daimyo',
+        emoji: '🛡️',
+        hpBonus: 25,
+        price: 3000,
+        description: 'Armadura reforzada de señor feudal (+25 HP)'
+      },
+      SHOGUN_ARMOR: {
+        id: 'shogun_armor',
+        name: 'Armadura del Shogun',
+        emoji: '👑',
+        hpBonus: 50,
+        price: 15000,
+        description: 'Armadura sagrada del comandante supremo (+50 HP)'
+      }
+    },
+
+    // Habilidades especiales (se compran permanentemente)
+    SKILLS: {
+      FLAME_SLASH: {
+        id: 'flame_slash',
+        name: 'Corte Llameante',
+        emoji: '🔥',
+        kiCost: 3,
+        damage: 60,
+        accuracy: 1.0,                       // 100% garantizado
+        cooldown: 3,                         // Turnos de cooldown
+        price: 5000,
+        description: 'Corte infernal que causa 60 daño garantizado'
+      },
+      TEMPEST_DANCE: {
+        id: 'tempest_dance',
+        name: 'Danza de la Tempestad',
+        emoji: '🌪️',
+        kiCost: 3,
+        hits: 3,
+        damagePerHit: { min: 12, max: 18 },
+        accuracy: 0.70,
+        cooldown: 4,
+        price: 7500,
+        description: 'Tres ataques rápidos en sucesión'
+      },
+      SHOGUN_STANCE: {
+        id: 'shogun_stance',
+        name: 'Postura del Shogun',
+        emoji: '🏯',
+        kiCost: 3,
+        immunity: true,                      // Inmunidad completa 1 turno
+        cooldown: 5,
+        price: 10000,
+        description: 'Inmunidad total al daño durante 1 turno'
+      },
+      HEAVEN_BLADE: {
+        id: 'heaven_blade',
+        name: 'Filo Celestial',
+        emoji: '⚡',
+        kiCost: 3,
+        damage: 100,
+        accuracy: 1.0,
+        usesPerDuel: 1,                      // Solo 1 uso por duelo
+        price: 15000,
+        description: 'Técnica definitiva: 100 daño garantizado (1 uso/duelo)'
+      }
+    },
+
+    // Items consumibles (se usan en duelo)
+    CONSUMABLES: {
+      HEALING_TEA: {
+        id: 'healing_tea',
+        name: 'Té Medicinal',
+        emoji: '🍵',
+        healAmount: 30,
+        price: 200,
+        description: 'Restaura 30 HP durante el combate'
+      },
+      WARRIOR_ELIXIR: {
+        id: 'warrior_elixir',
+        name: 'Elixir del Guerrero',
+        emoji: '💊',
+        damageBoost: 0.50,                   // +50% daño
+        duration: 3,                         // 3 turnos
+        price: 500,
+        description: 'Aumenta tu daño en 50% por 3 turnos'
+      },
+      PRECISION_CHARM: {
+        id: 'precision_charm',
+        name: 'Amuleto de Precisión',
+        emoji: '🔮',
+        accuracyBoost: 0.30,                 // +30% precisión
+        duration: 999,                       // Todo el duelo
+        price: 300,
+        description: 'Aumenta la precisión en 30% durante todo el duelo'
+      },
+      KI_POTION: {
+        id: 'ki_potion',
+        name: 'Poción de Ki',
+        emoji: '⚗️',
+        kiRestore: 2,
+        price: 250,
+        description: 'Restaura 2 puntos de Ki inmediatamente'
+      }
+    }
+  },
+
+  // ==================== SISTEMA DE ARENA (COMBATE VS IA) ====================
+  ARENA: {
+    // Niveles de dificultad
+    DIFFICULTIES: {
+      RONIN: {
+        id: 'ronin',
+        name: 'Tierras Ronin',
+        emoji: '🥋',
+        description: 'Enemigos principiantes - Ideal para entrenar',
+        entryCost: 50,
+        aiLevel: 1,
+        rewards: {
+          koku: { min: 100, max: 200 },
+          honor: { min: 5, max: 10 },
+          consumableChance: 0.20  // 20% chance de drop
+        },
+        aiStats: {
+          hpMultiplier: 0.8,      // 80% HP normal
+          damageMultiplier: 0.7,  // 70% daño normal
+          weapon: null,
+          armor: null,
+          aggressiveness: 0.3     // 30% chance de usar habilidades
+        }
+      },
+      SAMURAI: {
+        id: 'samurai',
+        name: 'Tierras Samurai',
+        emoji: '⚔️',
+        description: 'Guerreros entrenados - Requiere equipamiento básico',
+        entryCost: 100,
+        aiLevel: 2,
+        rewards: {
+          koku: { min: 200, max: 400 },
+          honor: { min: 15, max: 25 },
+          consumableChance: 0.35
+        },
+        aiStats: {
+          hpMultiplier: 1.0,      // HP normal
+          damageMultiplier: 1.0,  // Daño normal
+          weapon: 'wooden_katana',
+          armor: 'apprentice_gi',
+          aggressiveness: 0.5
+        }
+      },
+      DAIMYO: {
+        id: 'daimyo',
+        name: 'Tierras Daimyo',
+        emoji: '👑',
+        description: 'Maestros del combate - Requiere buen equipamiento',
+        entryCost: 150,
+        aiLevel: 3,
+        rewards: {
+          koku: { min: 400, max: 700 },
+          honor: { min: 30, max: 45 },
+          consumableChance: 0.50
+        },
+        aiStats: {
+          hpMultiplier: 1.3,      // 130% HP
+          damageMultiplier: 1.2,  // 120% daño
+          weapon: 'steel_katana',
+          armor: 'daimyo_armor',
+          aggressiveness: 0.7,
+          skills: ['flame_slash']  // Tiene habilidad
+        }
+      },
+      SHOGUN: {
+        id: 'shogun',
+        name: 'Tierras Shogun',
+        emoji: '🏯',
+        description: 'BOSS FINAL - Solo para guerreros legendarios',
+        entryCost: 200,
+        aiLevel: 4,
+        rewards: {
+          koku: { min: 700, max: 1200 },
+          honor: { min: 50, max: 80 },
+          consumableChance: 0.80
+        },
+        aiStats: {
+          hpMultiplier: 1.5,      // 150% HP
+          damageMultiplier: 1.4,  // 140% daño
+          weapon: 'legendary_katana',
+          armor: 'shogun_armor',
+          aggressiveness: 0.9,
+          skills: ['flame_slash', 'tempest_dance'],
+          training: {             // IA tiene entrenamientos
+            strength: 10,
+            agility: 5,
+            vitality: 10
+          }
+        }
+      }
+    },
+
+    // Cooldown de arena
+    COOLDOWN: 300,  // 5 minutos entre batallas
+
+    // Drops de consumibles posibles
+    CONSUMABLE_DROPS: ['healing_tea', 'warrior_elixir', 'precision_charm', 'ki_potion']
+  },
+
+  // ==================== SISTEMA DE ENTRENAMIENTOS ====================
+  TRAINING: {
+    // Límites de entrenamiento
+    MAX_LEVEL: 20,                           // Nivel máximo de cada stat
+
+    // Tipos de entrenamiento disponibles
+    TYPES: {
+      STRENGTH: {
+        id: 'strength',
+        name: 'Entrenar Fuerza',
+        emoji: '💪',
+        baseCost: 500,
+        costIncrease: 50,                    // +50 koku por nivel
+        maxLevel: 20,
+        bonusPerLevel: 0.01,                 // +1% daño por nivel
+        description: 'Aumenta tu daño base permanentemente'
+      },
+      AGILITY: {
+        id: 'agility',
+        name: 'Entrenar Agilidad',
+        emoji: '🏃',
+        baseCost: 500,
+        costIncrease: 50,
+        maxLevel: 15,
+        bonusPerLevel: 0.02,                 // +2% evasión por nivel
+        description: 'Aumenta tu probabilidad de esquivar ataques'
+      },
+      KI_MASTERY: {
+        id: 'ki_mastery',
+        name: 'Meditar Ki',
+        emoji: '🧘',
+        baseCost: 2000,
+        costIncrease: 500,
+        maxLevel: 5,
+        bonusPerLevel: 1,                    // +1 Ki máximo por nivel
+        description: 'Aumenta tu Ki máximo por turno'
+      },
+      VITALITY: {
+        id: 'vitality',
+        name: 'Entrenar Resistencia',
+        emoji: '❤️',
+        baseCost: 750,
+        costIncrease: 75,
+        maxLevel: 10,
+        bonusPerLevel: 5,                    // +5 HP por nivel
+        description: 'Aumenta tu HP máximo permanentemente'
+      }
     }
   },
 
@@ -181,8 +548,11 @@ const CONSTANTS = {
     CATEGORIES: {
       BOOSTS: 'boosts',
       COSMETICS: 'cosmetics',
-      CONSUMABLES: 'consumables',
-      PERMANENT: 'permanent'
+      PERMANENT: 'permanent',
+      WEAPONS: 'weapons',              // Armas de combate
+      ARMOR: 'armor',                  // Armaduras
+      SKILLS: 'skills',                // Habilidades especiales
+      CONSUMABLES: 'consumables'       // Items consumibles de combate
     },
 
     // Items de la tienda
@@ -323,6 +693,140 @@ const CONSTANTS = {
         price: 15000,
         type: 'permanent',
         effect: { honorBonus: 0.05 }
+      },
+
+      // ========== ARMAS DE COMBATE ==========
+      WOODEN_KATANA: {
+        id: 'wooden_katana',
+        name: '🗡️ Katana de Madera',
+        description: 'Katana de entrenamiento (+5 daño)',
+        category: 'weapons',
+        price: 1000,
+        type: 'equipment',
+        stats: { damageBonus: 5 }
+      },
+      STEEL_KATANA: {
+        id: 'steel_katana',
+        name: '⚔️ Katana Forjada',
+        description: 'Katana de acero templado (+10 daño)',
+        category: 'weapons',
+        price: 5000,
+        type: 'equipment',
+        stats: { damageBonus: 10 }
+      },
+      LEGENDARY_KATANA: {
+        id: 'legendary_katana',
+        name: '🔥 Katana Legendaria',
+        description: 'Obra maestra forjada (+20 daño)',
+        category: 'weapons',
+        price: 25000,
+        type: 'equipment',
+        stats: { damageBonus: 20 }
+      },
+
+      // ========== ARMADURAS ==========
+      APPRENTICE_GI: {
+        id: 'apprentice_gi',
+        name: '🥋 Gi del Aprendiz',
+        description: 'Vestimenta básica de entrenamiento (+10 HP)',
+        category: 'armor',
+        price: 800,
+        type: 'equipment',
+        stats: { hpBonus: 10 }
+      },
+      DAIMYO_ARMOR: {
+        id: 'daimyo_armor',
+        name: '🛡️ Armadura del Daimyo',
+        description: 'Armadura reforzada (+25 HP)',
+        category: 'armor',
+        price: 3000,
+        type: 'equipment',
+        stats: { hpBonus: 25 }
+      },
+      SHOGUN_ARMOR: {
+        id: 'shogun_armor',
+        name: '👑 Armadura del Shogun',
+        description: 'Armadura sagrada (+50 HP)',
+        category: 'armor',
+        price: 15000,
+        type: 'equipment',
+        stats: { hpBonus: 50 }
+      },
+
+      // ========== HABILIDADES ESPECIALES ==========
+      FLAME_SLASH: {
+        id: 'flame_slash',
+        name: '🔥 Corte Llameante',
+        description: 'Corte infernal: 60 daño garantizado',
+        category: 'skills',
+        price: 5000,
+        type: 'skill',
+        skillData: { damage: 60, kiCost: 3, cooldown: 3 }
+      },
+      TEMPEST_DANCE: {
+        id: 'tempest_dance',
+        name: '🌪️ Danza de la Tempestad',
+        description: 'Tres ataques rápidos en sucesión',
+        category: 'skills',
+        price: 7500,
+        type: 'skill',
+        skillData: { hits: 3, kiCost: 3, cooldown: 4 }
+      },
+      SHOGUN_STANCE: {
+        id: 'shogun_stance',
+        name: '🏯 Postura del Shogun',
+        description: 'Inmunidad total 1 turno',
+        category: 'skills',
+        price: 10000,
+        type: 'skill',
+        skillData: { immunity: true, kiCost: 3, cooldown: 5 }
+      },
+      HEAVEN_BLADE: {
+        id: 'heaven_blade',
+        name: '⚡ Filo Celestial',
+        description: 'Técnica definitiva: 100 daño (1 uso/duelo)',
+        category: 'skills',
+        price: 15000,
+        type: 'skill',
+        skillData: { damage: 100, kiCost: 3, usesPerDuel: 1 }
+      },
+
+      // ========== CONSUMIBLES DE COMBATE ==========
+      HEALING_TEA: {
+        id: 'healing_tea',
+        name: '🍵 Té Medicinal',
+        description: 'Restaura 30 HP en combate',
+        category: 'consumables',
+        price: 200,
+        type: 'consumable',
+        effect: { healAmount: 30 }
+      },
+      WARRIOR_ELIXIR: {
+        id: 'warrior_elixir',
+        name: '💊 Elixir del Guerrero',
+        description: '+50% daño por 3 turnos',
+        category: 'consumables',
+        price: 500,
+        type: 'consumable',
+        effect: { damageBoost: 0.50, duration: 3 }
+      },
+      PRECISION_CHARM: {
+        id: 'precision_charm',
+        name: '🔮 Amuleto de Precisión',
+        description: '+30% precisión todo el duelo',
+        category: 'consumables',
+        price: 300,
+        type: 'consumable',
+        effect: { accuracyBoost: 0.30, duration: 999 }
+      },
+      KI_POTION: {
+        id: 'ki_potion',
+        name: '⚗️ Poción de Ki',
+        description: 'Restaura 2 Ki inmediatamente',
+        category: 'consumables',
+        price: 250,
+        type: 'consumable',
+        effect: { kiRestore: 2 }
       }
     }
   },
@@ -567,6 +1071,124 @@ CONSTANTS.getInventoryCapacity = function(userData) {
   return capacity;
 };
 
+/**
+ * Calcula el ranking de duelo basado en victorias
+ * @param {number} wins - Número de victorias
+ * @returns {object} Información del rank { name, emoji, color, min, max }
+ */
+CONSTANTS.getDuelRank = function(wins) {
+  const ranks = CONSTANTS.DUELS.RANKS;
+  if (wins >= ranks.LEYENDA.min) return ranks.LEYENDA;
+  if (wins >= ranks.MAESTRO.min) return ranks.MAESTRO;
+  if (wins >= ranks.EXPERTO.min) return ranks.EXPERTO;
+  return ranks.NOVATO;
+};
+
+/**
+ * Calcula el costo de un nivel de entrenamiento
+ * @param {string} trainingType - Tipo de entrenamiento (strength, agility, etc.)
+ * @param {number} currentLevel - Nivel actual
+ * @returns {number} Costo en koku
+ */
+CONSTANTS.getTrainingCost = function(trainingType, currentLevel) {
+  const training = CONSTANTS.TRAINING.TYPES[trainingType.toUpperCase()];
+  if (!training) return 0;
+  return training.baseCost + (training.costIncrease * currentLevel);
+};
+
+/**
+ * Calcula el HP máximo de un jugador basado en equipamiento y entrenamientos
+ * @param {Object} combatData - Datos de combate del usuario
+ * @returns {number} HP máximo
+ */
+CONSTANTS.calculateMaxHP = function(combatData) {
+  let maxHP = CONSTANTS.COMBAT.BASE_HP;
+
+  // Bonus de armadura
+  if (combatData.equipment && combatData.equipment.armor) {
+    const armorId = combatData.equipment.armor.toUpperCase();
+    const armor = CONSTANTS.COMBAT.ARMOR[armorId];
+    if (armor) maxHP += armor.hpBonus;
+  }
+
+  // Bonus de entrenamiento de vitalidad
+  if (combatData.training && combatData.training.vitality) {
+    const vitalityBonus = CONSTANTS.TRAINING.TYPES.VITALITY.bonusPerLevel;
+    maxHP += combatData.training.vitality * vitalityBonus;
+  }
+
+  return maxHP;
+};
+
+/**
+ * Calcula el Ki máximo de un jugador
+ * @param {Object} combatData - Datos de combate del usuario
+ * @returns {number} Ki máximo
+ */
+CONSTANTS.calculateMaxKi = function(combatData) {
+  let maxKi = CONSTANTS.COMBAT.BASE_KI;
+
+  // Bonus de entrenamiento de ki
+  if (combatData.training && combatData.training.ki_mastery) {
+    const kiBonus = CONSTANTS.TRAINING.TYPES.KI_MASTERY.bonusPerLevel;
+    maxKi += combatData.training.ki_mastery * kiBonus;
+  }
+
+  return maxKi;
+};
+
+/**
+ * Calcula el bonus de daño de un jugador
+ * @param {Object} combatData - Datos de combate del usuario
+ * @returns {number} Bonus de daño
+ */
+CONSTANTS.calculateDamageBonus = function(combatData) {
+  let damageBonus = 0;
+
+  // Bonus de arma
+  if (combatData.equipment && combatData.equipment.weapon) {
+    const weaponId = combatData.equipment.weapon.toUpperCase();
+    const weapon = CONSTANTS.COMBAT.WEAPONS[weaponId];
+    if (weapon) damageBonus += weapon.damageBonus;
+  }
+
+  return damageBonus;
+};
+
+/**
+ * Calcula el multiplicador de daño basado en entrenamientos
+ * @param {Object} combatData - Datos de combate del usuario
+ * @returns {number} Multiplicador de daño (1.0 = sin bonus)
+ */
+CONSTANTS.calculateDamageMultiplier = function(combatData) {
+  let multiplier = 1.0;
+
+  // Bonus de fuerza
+  if (combatData.training && combatData.training.strength) {
+    const strengthBonus = CONSTANTS.TRAINING.TYPES.STRENGTH.bonusPerLevel;
+    multiplier += combatData.training.strength * strengthBonus;
+  }
+
+  return multiplier;
+};
+
+/**
+ * Calcula la probabilidad de evasión
+ * @param {Object} combatData - Datos de combate del usuario
+ * @returns {number} Probabilidad de evasión (0.0 - 1.0)
+ */
+CONSTANTS.calculateEvasionChance = function(combatData) {
+  let evasion = 0;
+
+  // Bonus de agilidad
+  if (combatData.training && combatData.training.agility) {
+    const agilityBonus = CONSTANTS.TRAINING.TYPES.AGILITY.bonusPerLevel;
+    evasion += combatData.training.agility * agilityBonus;
+  }
+
+  return Math.min(evasion, 0.30); // Cap de 30% evasión
+};
+
 // ==================== VALIDACIONES ====================
 
 /**
@@ -654,6 +1276,9 @@ Object.freeze(CONSTANTS.DATA);
 Object.freeze(CONSTANTS.LEADERBOARDS);
 Object.freeze(CONSTANTS.VALIDATION);
 Object.freeze(CONSTANTS.DUELS);
+Object.freeze(CONSTANTS.COMBAT);
+Object.freeze(CONSTANTS.ARENA);
+Object.freeze(CONSTANTS.TRAINING);
 Object.freeze(CONSTANTS.FORTUNE);
 Object.freeze(CONSTANTS.TRANSLATION);
 Object.freeze(CONSTANTS.WISDOM_QUOTES);

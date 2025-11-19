@@ -5296,7 +5296,47 @@ client.on(Events.InteractionCreate, async (interaction) => {
             name: MESSAGES.PROFILE.STATS_TITLE,
             value: `${EMOJIS.MESSAGE} Mensajes: **${userData.stats?.messagesCount || 0}**\n${EMOJIS.VOICE} Tiempo en voz: **${userData.stats?.voiceMinutes || 0}** min\n${EMOJIS.DUEL} Duelos: **${userData.stats?.duelsWon || 0}**W / **${userData.stats?.duelsLost || 0}**L (${userData.stats?.duelsTotal || 0} total)`,
             inline: false
-          },
+          }
+        );
+
+      // Stats de combate (si tiene datos de combate)
+      if (userData.combat) {
+        const combat = userData.combat;
+        const weaponData = combat.equipment?.weapon
+          ? CONSTANTS.COMBAT.WEAPONS[combat.equipment.weapon.toUpperCase()]
+          : null;
+        const armorData = combat.equipment?.armor
+          ? CONSTANTS.COMBAT.ARMOR[combat.equipment.armor.toUpperCase()]
+          : null;
+
+        const weaponInfo = weaponData
+          ? `${weaponData.emoji} ${weaponData.name}`
+          : '❌ Sin arma';
+        const armorInfo = armorData
+          ? `${armorData.emoji} ${armorData.name}`
+          : '❌ Sin armadura';
+
+        const training = combat.training || { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 };
+        const skillsCount = combat.skills?.length || 0;
+        const arenaWins = userData.stats?.arenaWins || 0;
+
+        const combatStats =
+          `⚔️ **Equipamiento:**\n` +
+          `   ${weaponInfo}\n` +
+          `   ${armorInfo}\n` +
+          `💪 **Entrenamiento:**\n` +
+          `   Fuerza: ${training.strength} | Agilidad: ${training.agility}\n` +
+          `   Ki: ${training.ki_mastery} | Resistencia: ${training.vitality}\n` +
+          `🔥 Habilidades: **${skillsCount}** | 🏆 Arena: **${arenaWins}** victorias`;
+
+        embed.addFields({
+          name: '⚔️ Stats de Combate',
+          value: combatStats,
+          inline: false
+        });
+      }
+
+      embed.addFields(
           {
             name: MESSAGES.PROFILE.CLAN_TITLE,
             value: clan ? `🏯 **${clan.name}** [${clan.tag}]` : MESSAGES.PROFILE.NO_CLAN,
@@ -7219,14 +7259,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const itemsByCategory = {
             boosts: items.filter(i => i.category === 'boosts'),
             cosmetics: items.filter(i => i.category === 'cosmetics'),
-            permanent: items.filter(i => i.category === 'permanent')
+            permanent: items.filter(i => i.category === 'permanent'),
+            weapons: items.filter(i => i.category === 'weapons'),
+            armor: items.filter(i => i.category === 'armor'),
+            skills: items.filter(i => i.category === 'skills'),
+            consumables: items.filter(i => i.category === 'consumables')
           };
 
           let description = '';
           const categoryNames = {
             boosts: '⚡ **BOOSTS TEMPORALES**',
             cosmetics: '🎨 **ITEMS COSMÉTICOS**',
-            permanent: '⭐ **ITEMS PERMANENTES**'
+            permanent: '⭐ **ITEMS PERMANENTES**',
+            weapons: '⚔️ **ARMAS DE COMBATE**',
+            armor: '🛡️ **ARMADURAS**',
+            skills: '🔥 **HABILIDADES ESPECIALES**',
+            consumables: '🍵 **CONSUMIBLES DE COMBATE**'
           };
 
           for (const [cat, catItems] of Object.entries(itemsByCategory)) {
@@ -7341,6 +7389,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setStyle(ButtonStyle.Secondary)
           .setEmoji('⭐');
 
+        const weaponsButton = new ButtonBuilder()
+          .setCustomId('shop_category_weapons')
+          .setLabel('Armas')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('⚔️');
+
+        const armorButton = new ButtonBuilder()
+          .setCustomId('shop_category_armor')
+          .setLabel('Armaduras')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('🛡️');
+
+        const skillsButton = new ButtonBuilder()
+          .setCustomId('shop_category_skills')
+          .setLabel('Habilidades')
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji('🔥');
+
         const inventoryButton = new ButtonBuilder()
           .setCustomId('shop_view_inventory')
           .setLabel('Mi Inventario')
@@ -7360,6 +7426,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const inventoryRow = new ActionRowBuilder()
           .addComponents(inventoryButton);
 
+        // Crear filas de componentes (2 filas para categorías)
+        const categoryRow1 = new ActionRowBuilder()
+          .addComponents(allButton, boostsButton, cosmeticsButton, permanentButton, inventoryButton);
+
+        const categoryRow2 = new ActionRowBuilder()
+          .addComponents(weaponsButton, armorButton, skillsButton, consumablesButton);
+        
         const closeRow = new ActionRowBuilder()
           .addComponents(closeButton);
 
@@ -7371,6 +7444,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const message = await interaction.editReply({
           embeds: [generateShopEmbed(initialCategory)],
           components: [selectMenuRow, categoryRow, inventoryRow, closeRow],
+          components: [selectMenuRow, categoryRow1, categoryRow2, closeRow],
           flags: MessageFlags.Ephemeral
         });
 
@@ -7464,6 +7538,52 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   purchasedAt: Date.now()
                 });
                 purchaseMessage = `✅ ¡Compra exitosa! Has adquirido **${item.name}** permanentemente.\n💰 Koku restante: **${currentUserData.koku.toLocaleString()}**`;
+              } else if (item.type === 'equipment') {
+                // Armas y armaduras - agregar al inventario
+                if (!currentUserData.combat) {
+                  currentUserData.combat = {
+                    equipment: { weapon: null, armor: null },
+                    skills: [],
+                    training: { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 },
+                    consumables: []
+                  };
+                }
+
+                // Verificar si ya posee el item
+                const hasItem = currentUserData.inventory.some(inv => inv.itemId === item.id);
+                if (hasItem) {
+                  currentUserData.koku += item.price; // Reembolsar
+                  await dataManager.saveUsers();
+                  return i.reply({ content: '❌ Ya posees este equipamiento.', flags: MessageFlags.Ephemeral });
+                }
+
+                currentUserData.inventory.push({
+                  itemId: item.id,
+                  purchasedAt: Date.now()
+                });
+
+                const equipType = item.category === 'weapons' ? 'arma' : 'armadura';
+                purchaseMessage = `✅ ¡Compra exitosa! Has adquirido **${item.name}**.\n💡 Usa \`/equipar ${item.category === 'weapons' ? 'arma' : 'armadura'} ${item.id}\` para equiparlo.\n💰 Koku restante: **${currentUserData.koku.toLocaleString()}**`;
+              } else if (item.type === 'skill') {
+                // Habilidades especiales
+                if (!currentUserData.combat) {
+                  currentUserData.combat = {
+                    equipment: { weapon: null, armor: null },
+                    skills: [],
+                    training: { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 },
+                    consumables: []
+                  };
+                }
+
+                // Verificar si ya posee la habilidad
+                if (currentUserData.combat.skills.includes(item.id)) {
+                  currentUserData.koku += item.price; // Reembolsar
+                  await dataManager.saveUsers();
+                  return i.reply({ content: '❌ Ya posees esta habilidad.', flags: MessageFlags.Ephemeral });
+                }
+
+                currentUserData.combat.skills.push(item.id);
+                purchaseMessage = `✅ ¡Compra exitosa! Has aprendido **${item.name}**.\n💡 Podrás usarla en combates de Arena.\n💰 Koku restante: **${currentUserData.koku.toLocaleString()}**`;
               }
 
               await dataManager.saveUsers();
@@ -7487,13 +7607,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
               // Botón de cerrar
               if (i.customId === 'shop_close') {
                 // Deshabilitar todos los componentes
-                const disabledCategoryRow = new ActionRowBuilder()
+                const disabledCategoryRow1 = new ActionRowBuilder()
                   .addComponents(
                     allButton.setDisabled(true),
                     boostsButton.setDisabled(true),
                     cosmeticsButton.setDisabled(true),
                     permanentButton.setDisabled(true),
                     inventoryButton.setDisabled(true)
+                  );
+
+                const disabledCategoryRow2 = new ActionRowBuilder()
+                  .addComponents(
+                    weaponsButton.setDisabled(true),
+                    armorButton.setDisabled(true),
+                    skillsButton.setDisabled(true),
+                    consumablesButton.setDisabled(true)
                   );
 
                 const disabledSelectRow = new ActionRowBuilder()
@@ -7504,9 +7632,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 await i.update({
                   embeds: [generateShopEmbed(currentCategory)],
-                  components: [disabledSelectRow, disabledCategoryRow, disabledCloseRow]
+                  components: [disabledSelectRow, disabledCategoryRow1, disabledCategoryRow2, disabledCloseRow]
                 });
-                
+
                 collector.stop('closed');
                 return;
               }
@@ -7856,6 +7984,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 newCategory = 'consumables';
               } else if (i.customId === 'shop_category_permanent') {
                 newCategory = 'permanent';
+              } else if (i.customId === 'shop_category_weapons') {
+                newCategory = 'weapons';
+              } else if (i.customId === 'shop_category_armor') {
+                newCategory = 'armor';
+              } else if (i.customId === 'shop_category_skills') {
+                newCategory = 'skills';
+              } else if (i.customId === 'shop_category_consumables') {
+                newCategory = 'consumables';
               }
 
               currentCategory = newCategory;
@@ -7896,13 +8032,42 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
               const updatedInventoryRow = new ActionRowBuilder()
                 .addComponents(inventoryButton);
+              const updatedWeaponsButton = new ButtonBuilder()
+                .setCustomId('shop_category_weapons')
+                .setLabel('Armas')
+                .setStyle(newCategory === 'weapons' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+                .setEmoji('⚔️');
+
+              const updatedArmorButton = new ButtonBuilder()
+                .setCustomId('shop_category_armor')
+                .setLabel('Armaduras')
+                .setStyle(newCategory === 'armor' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+                .setEmoji('🛡️');
+
+              const updatedSkillsButton = new ButtonBuilder()
+                .setCustomId('shop_category_skills')
+                .setLabel('Habilidades')
+                .setStyle(newCategory === 'skills' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+                .setEmoji('🔥');
+
+              const updatedConsumablesButton2 = new ButtonBuilder()
+                .setCustomId('shop_category_consumables')
+                .setLabel('Consumibles')
+                .setStyle(newCategory === 'consumables' ? ButtonStyle.Primary : ButtonStyle.Secondary)
+                .setEmoji('🍵');
+
+              const updatedCategoryRow1 = new ActionRowBuilder()
+                .addComponents(updatedAllButton, updatedBoostsButton, updatedCosmeticsButton, updatedPermanentButton, inventoryButton);
+
+              const updatedCategoryRow2 = new ActionRowBuilder()
+                .addComponents(updatedWeaponsButton, updatedArmorButton, updatedSkillsButton, updatedConsumablesButton2);
 
               // Obtener datos actualizados del usuario
               const updatedUserDataForCategory = dataManager.getUser(userId, guildId);
 
               await i.update({
                 embeds: [generateShopEmbed(newCategory, updatedUserDataForCategory)],
-                components: [new ActionRowBuilder().addComponents(generateItemSelectMenu(newCategory)), updatedCategoryRow, updatedInventoryRow, closeRow]
+                components: [new ActionRowBuilder().addComponents(generateItemSelectMenu(newCategory)), updatedCategoryRow1, updatedCategoryRow2, closeRow]
               });
             }
           } catch (error) {
@@ -8785,6 +8950,895 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         console.log(`🏪 ${interaction.user.tag} consultó su inventario`);
       }
+    }
+
+    // ==================== SISTEMA DE ARENA (COMBATE VS IA) ====================
+
+    else if (commandName === 'arena') {
+      // Verificar que el comando se use en el canal correcto
+      const combatChannelId = '1439009626396823594';
+      if (interaction.channel.id !== combatChannelId) {
+        return interaction.reply({
+          content: `❌ El comando \`/arena\` solo puede usarse en <#${combatChannelId}>.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const difficulty = interaction.options.getString('dificultad');
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+
+      // Si no se especificó dificultad, mostrar dropdown
+      if (!difficulty) {
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId('arena_difficulty_select')
+          .setPlaceholder('Selecciona la dificultad del combate')
+          .setMinValues(1)
+          .setMaxValues(1)
+          .addOptions(
+            {
+              label: 'Tierras Ronin (Fácil)',
+              description: 'Entrada: 50 koku | Recompensa: 100-200 koku',
+              value: 'ronin',
+              emoji: '🥋'
+            },
+            {
+              label: 'Tierras Samurai (Normal)',
+              description: 'Entrada: 100 koku | Recompensa: 200-400 koku',
+              value: 'samurai',
+              emoji: '⚔️'
+            },
+            {
+              label: 'Tierras Daimyo (Difícil)',
+              description: 'Entrada: 150 koku | Recompensa: 400-700 koku',
+              value: 'daimyo',
+              emoji: '👑'
+            },
+            {
+              label: 'Tierras Shogun (EXTREMO)',
+              description: 'Entrada: 200 koku | Recompensa: 700-1200 koku',
+              value: 'shogun',
+              emoji: '🏯'
+            }
+          );
+
+        const row = new ActionRowBuilder().addComponents(selectMenu);
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle('⚔️ Arena Samurái - Selección de Dificultad')
+          .setDescription(
+            'Elige el nivel de dificultad para tu combate contra un guerrero IA.\n\n' +
+            '**Dificultades Disponibles:**\n' +
+            '🥋 **Ronin** - Principiantes (50 koku)\n' +
+            '⚔️ **Samurai** - Guerreros entrenados (100 koku)\n' +
+            '👑 **Daimyo** - Maestros del combate (150 koku)\n' +
+            '🏯 **Shogun** - BOSS FINAL (200 koku)'
+          )
+          .setFooter({ text: 'Selecciona una opción del menú desplegable' })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+
+        // Crear collector para el dropdown
+        const message = await interaction.fetchReply();
+        const collector = message.createMessageComponentCollector({
+          filter: (i) => i.user.id === userId && i.customId === 'arena_difficulty_select',
+          time: 60000
+        });
+
+        collector.on('collect', async (i) => {
+          const selectedDifficulty = i.values[0];
+
+          // Ejecutar el comando con la dificultad seleccionada
+          await i.deferUpdate();
+
+          // Obtener datos de dificultad
+          const diffData = CONSTANTS.ARENA.DIFFICULTIES[selectedDifficulty.toUpperCase()];
+
+          // Verificar cooldown
+          if (dataManager.hasCooldown(userId, 'arena')) {
+            const timeLeft = dataManager.getCooldownTime(userId, 'arena');
+            return i.followUp({
+              content: MESSAGES.ERRORS.COOLDOWN(timeLeft),
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Obtener usuario y verificar koku
+          const userData = dataManager.getUser(userId, guildId);
+
+          if (userData.koku < diffData.entryCost) {
+            return i.followUp({
+              content: `❌ No tienes suficiente koku. Necesitas **${diffData.entryCost} koku** para entrar a ${diffData.name}.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Cobrar entrada
+          userData.koku -= diffData.entryCost;
+          dataManager.updateUser(userId, guildId, { koku: userData.koku });
+
+          // Establecer cooldown
+          dataManager.setCooldown(userId, 'arena', CONSTANTS.ARENA.COOLDOWN);
+
+          // Crear combate vs IA
+          const combatManager = require('./utils/combatManager');
+          const duelId = combatManager.createArenaBattle(userData, selectedDifficulty);
+          const duel = combatManager.getDuel(duelId);
+
+          // Generar embed inicial
+          const combatEmbed = combatManager.generateCombatEmbed(duel);
+          combatEmbed.setDescription(`${diffData.emoji} **${diffData.name}**\n${diffData.description}\n\n💰 Entrada: ${diffData.entryCost} koku`);
+
+          // Generar botones
+          const buttons = combatManager.generateCombatButtons(duel.challenger);
+
+          await i.editReply({ embeds: [combatEmbed], components: buttons });
+
+          // Guardar referencia a la última interacción para poder editar al expirar
+          let lastInteraction = i;
+
+          // Collector para acciones de combate
+          const combatCollector = message.createMessageComponentCollector({
+            filter: (btnI) => btnI.user.id === userId,
+            time: 300000
+          });
+
+          combatCollector.on('collect', async (btnInteraction) => {
+            if (!btnInteraction.customId.startsWith('combat_')) return;
+
+            await btnInteraction.deferUpdate();
+            lastInteraction = btnInteraction; // Actualizar última interacción
+
+            const actionType = btnInteraction.customId.replace('combat_', '');
+            const result = combatManager.processAction(duelId, userId, actionType, {});
+
+            if (!result.success) {
+              return btnInteraction.followUp({
+                content: result.message,
+                flags: MessageFlags.Ephemeral
+              });
+            }
+
+            const updatedDuel = combatManager.getDuel(duelId);
+
+            if (result.gameOver) {
+              const finalEmbed = combatManager.generateCombatEmbed(updatedDuel);
+              finalEmbed.addFields({
+                name: result.winner === 'challenger' ? '🎉 ¡VICTORIA!' : '💀 DERROTA',
+                value: result.reason,
+                inline: false
+              });
+
+              if (result.winner === 'challenger') {
+                const rewards = diffData.rewards;
+                const kokuReward = Math.floor(Math.random() * (rewards.koku.max - rewards.koku.min + 1)) + rewards.koku.min;
+                const honorReward = Math.floor(Math.random() * (rewards.honor.max - rewards.honor.min + 1)) + rewards.honor.min;
+
+                dataManager.addHonor(userId, guildId, honorReward);
+                userData.koku += kokuReward;
+                dataManager.updateUser(userId, guildId, { koku: userData.koku });
+
+                if (!userData.stats.arenaWins) userData.stats.arenaWins = 0;
+                userData.stats.arenaWins++;
+                dataManager.updateUser(userId, guildId, { stats: userData.stats });
+
+                let rewardText = `💰 **${kokuReward} koku**\n⭐ **${honorReward} honor**`;
+
+                if (Math.random() < rewards.consumableChance) {
+                  const randomConsumable = CONSTANTS.ARENA.CONSUMABLE_DROPS[Math.floor(Math.random() * CONSTANTS.ARENA.CONSUMABLE_DROPS.length)];
+                  dataManager.addConsumable(userId, guildId, randomConsumable, 1);
+                  const itemData = CONSTANTS.SHOP.ITEMS[randomConsumable.toUpperCase()];
+                  rewardText += `\n🎁 **${itemData.name}**`;
+                }
+
+                finalEmbed.addFields({
+                  name: '🎁 Recompensas',
+                  value: rewardText,
+                  inline: false
+                });
+              }
+
+              await btnInteraction.editReply({ embeds: [finalEmbed], components: [] });
+              combatManager.endDuel(duelId);
+              combatCollector.stop();
+              return;
+            }
+
+            // Turno de la IA (con delay de 2 segundos para dar tiempo al jugador)
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            const aiAction = combatManager.aiDecideAction(updatedDuel);
+            const aiResult = combatManager.processAction(duelId, updatedDuel.opponent.userId, aiAction.actionType, aiAction.actionData);
+
+            const duelAfterAI = combatManager.getDuel(duelId);
+
+            if (aiResult.gameOver) {
+              const finalEmbed = combatManager.generateCombatEmbed(duelAfterAI);
+              finalEmbed.addFields({
+                name: aiResult.winner === 'challenger' ? '🎉 ¡VICTORIA!' : '💀 DERROTA',
+                value: aiResult.reason,
+                inline: false
+              });
+
+              if (aiResult.winner === 'challenger') {
+                const rewards = diffData.rewards;
+                const kokuReward = Math.floor(Math.random() * (rewards.koku.max - rewards.koku.min + 1)) + rewards.koku.min;
+                const honorReward = Math.floor(Math.random() * (rewards.honor.max - rewards.honor.min + 1)) + rewards.honor.min;
+
+                dataManager.addHonor(userId, guildId, honorReward);
+                userData.koku += kokuReward;
+                dataManager.updateUser(userId, guildId, { koku: userData.koku });
+
+                if (!userData.stats.arenaWins) userData.stats.arenaWins = 0;
+                userData.stats.arenaWins++;
+                dataManager.updateUser(userId, guildId, { stats: userData.stats });
+
+                let rewardText = `💰 **${kokuReward} koku**\n⭐ **${honorReward} honor**`;
+
+                if (Math.random() < rewards.consumableChance) {
+                  const randomConsumable = CONSTANTS.ARENA.CONSUMABLE_DROPS[Math.floor(Math.random() * CONSTANTS.ARENA.CONSUMABLE_DROPS.length)];
+                  dataManager.addConsumable(userId, guildId, randomConsumable, 1);
+                  const itemData = CONSTANTS.SHOP.ITEMS[randomConsumable.toUpperCase()];
+                  rewardText += `\n🎁 **${itemData.name}**`;
+                }
+
+                finalEmbed.addFields({
+                  name: '🎁 Recompensas',
+                  value: rewardText,
+                  inline: false
+                });
+              }
+
+              await btnInteraction.editReply({ embeds: [finalEmbed], components: [] });
+              combatManager.endDuel(duelId);
+              combatCollector.stop();
+              return;
+            }
+
+            const updatedEmbed = combatManager.generateCombatEmbed(duelAfterAI);
+            const updatedButtons = combatManager.generateCombatButtons(duelAfterAI.challenger);
+            await btnInteraction.editReply({ embeds: [updatedEmbed], components: updatedButtons });
+          });
+
+          combatCollector.on('end', async (collected, reason) => {
+            const finalDuel = combatManager.getDuel(duelId);
+
+            if (finalDuel) {
+              // Si el combate termina por timeout, determinar ganador por HP
+              if (reason === 'time') {
+                const challenger = finalDuel.challenger;
+                const opponent = finalDuel.opponent;
+
+                let winner;
+                let winnerName;
+                let resultText;
+
+                if (challenger.hp > opponent.hp) {
+                  winner = 'challenger';
+                  winnerName = '🎉 ¡VICTORIA!';
+                  resultText = `El combate ha finalizado por tiempo. ¡Ganaste con **${challenger.hp}/${challenger.maxHP} HP** restante!`;
+                } else if (opponent.hp > challenger.hp) {
+                  winner = 'opponent';
+                  winnerName = '💀 DERROTA';
+                  resultText = `El combate ha finalizado por tiempo. El oponente ganó con **${opponent.hp}/${opponent.maxHP} HP** restante.`;
+                } else {
+                  winner = null;
+                  winnerName = '⚔️ EMPATE';
+                  resultText = `El combate ha finalizado por tiempo. Ambos tienen **${challenger.hp} HP**. ¡Es un empate!`;
+                }
+
+                const finalEmbed = combatManager.generateCombatEmbed(finalDuel);
+                finalEmbed.addFields({
+                  name: winnerName,
+                  value: resultText,
+                  inline: false
+                });
+
+                // Si ganó el jugador, dar recompensas
+                if (winner === 'challenger') {
+                  const rewards = diffData.rewards;
+                  const kokuReward = Math.floor(Math.random() * (rewards.koku.max - rewards.koku.min + 1)) + rewards.koku.min;
+                  const honorReward = Math.floor(Math.random() * (rewards.honor.max - rewards.honor.min + 1)) + rewards.honor.min;
+
+                  dataManager.addHonor(userId, guildId, honorReward);
+                  userData.koku += kokuReward;
+                  dataManager.updateUser(userId, guildId, { koku: userData.koku });
+
+                  if (!userData.stats.arenaWins) userData.stats.arenaWins = 0;
+                  userData.stats.arenaWins++;
+                  dataManager.updateUser(userId, guildId, { stats: userData.stats });
+
+                  let rewardText = `💰 **${kokuReward} koku**\n⭐ **${honorReward} honor**`;
+
+                  if (Math.random() < rewards.consumableChance) {
+                    const randomConsumable = CONSTANTS.ARENA.CONSUMABLE_DROPS[Math.floor(Math.random() * CONSTANTS.ARENA.CONSUMABLE_DROPS.length)];
+                    dataManager.addConsumable(userId, guildId, randomConsumable, 1);
+                    const itemData = CONSTANTS.SHOP.ITEMS[randomConsumable.toUpperCase()];
+                    rewardText += `\n🎁 **${itemData.name}**`;
+                  }
+
+                  finalEmbed.addFields({
+                    name: '🎁 Recompensas',
+                    value: rewardText,
+                    inline: false
+                  });
+                }
+
+                try {
+                  await lastInteraction.editReply({ embeds: [finalEmbed], components: [] });
+                } catch (error) {
+                  console.log('⚠️ No se pudo editar el mensaje final del combate:', error.message);
+                }
+              }
+
+              combatManager.endDuel(duelId);
+            }
+          });
+        });
+
+        collector.on('end', () => {
+          // Timeout del selector
+        });
+
+        return;
+      }
+
+      // Obtener datos de dificultad
+      const difficultyData = CONSTANTS.ARENA.DIFFICULTIES[difficulty.toUpperCase()];
+      if (!difficultyData) {
+        return interaction.reply({
+          content: '❌ Dificultad inválida.',
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Verificar cooldown
+      if (dataManager.hasCooldown(userId, 'arena')) {
+        const timeLeft = dataManager.getCooldownTime(userId, 'arena');
+        return interaction.reply({
+          content: MESSAGES.ERRORS.COOLDOWN(timeLeft),
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Obtener usuario y verificar koku
+      const userData = dataManager.getUser(userId, guildId);
+
+      if (userData.koku < difficultyData.entryCost) {
+        return interaction.reply({
+          content: `❌ No tienes suficiente koku. Necesitas **${difficultyData.entryCost} koku** para entrar a ${difficultyData.name}.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Cobrar entrada
+      userData.koku -= difficultyData.entryCost;
+      dataManager.updateUser(userId, guildId, { koku: userData.koku });
+
+      // Establecer cooldown
+      dataManager.setCooldown(userId, 'arena', CONSTANTS.ARENA.COOLDOWN);
+
+      // Crear combate vs IA
+      const combatManager = require('./utils/combatManager');
+      const duelId = combatManager.createArenaBattle(userData, difficulty);
+      const duel = combatManager.getDuel(duelId);
+
+      // Generar embed inicial
+      const embed = combatManager.generateCombatEmbed(duel);
+
+      // Agregar información de la dificultad
+      embed.setDescription(`${difficultyData.emoji} **${difficultyData.name}**\n${difficultyData.description}\n\n💰 Entrada: ${difficultyData.entryCost} koku`);
+
+      // Generar botones de combate
+      const buttons = combatManager.generateCombatButtons(duel.challenger);
+
+      await interaction.reply({
+        content: `⚔️ ¡Combate iniciado! Es tu turno.`,
+        embeds: [embed],
+        components: buttons
+      });
+
+      console.log(`⚔️ ${interaction.user.tag} entró a la Arena (${difficulty})`);
+
+      // Collector para botones de combate
+      const filter = (i) => {
+        return i.user.id === userId && i.customId.startsWith('combat_');
+      };
+
+      const collector = interaction.channel.createMessageComponentCollector({
+        filter,
+        time: CONSTANTS.DUELS.TURN_TIMEOUT * 1000 * CONSTANTS.COMBAT.MAX_TURNS
+      });
+
+      collector.on('collect', async (buttonInteraction) => {
+        const currentDuel = combatManager.getDuel(duelId);
+        if (!currentDuel) {
+          return buttonInteraction.update({
+            content: '❌ Este combate ya terminó.',
+            components: []
+          });
+        }
+
+        // Extraer tipo de acción del customId
+        const actionType = buttonInteraction.customId.replace('combat_', '');
+
+        // Procesar acción del jugador
+        const result = combatManager.processAction(duelId, userId, actionType);
+
+        if (!result.success) {
+          return buttonInteraction.reply({
+            content: `❌ ${result.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Actualizar mensaje con resultado
+        let updateContent = `⚔️ Tu turno: ${result.message}`;
+
+        // Si el juego terminó
+        if (result.gameOver) {
+          const winner = result.winner === 'challenger';
+
+          if (winner) {
+            // Victoria - otorgar recompensas
+            const kokuReward = Math.floor(Math.random() * (difficultyData.rewards.koku.max - difficultyData.rewards.koku.min + 1)) + difficultyData.rewards.koku.min;
+            const honorReward = Math.floor(Math.random() * (difficultyData.rewards.honor.max - difficultyData.rewards.honor.min + 1)) + difficultyData.rewards.honor.min;
+
+            userData.koku += kokuReward;
+            dataManager.addHonor(userId, guildId, honorReward);
+
+            // Incrementar victorias
+            if (!userData.stats.arenaWins) userData.stats.arenaWins = 0;
+            userData.stats.arenaWins++;
+            dataManager.updateUser(userId, guildId, { stats: userData.stats, koku: userData.koku });
+
+            // Check de drop de consumible
+            let dropMessage = '';
+            if (Math.random() < difficultyData.rewards.consumableChance) {
+              const dropItem = CONSTANTS.ARENA.CONSUMABLE_DROPS[Math.floor(Math.random() * CONSTANTS.ARENA.CONSUMABLE_DROPS.length)];
+              dataManager.addConsumable(userId, guildId, dropItem, 1);
+              const itemData = CONSTANTS.COMBAT.CONSUMABLES[dropItem.toUpperCase()];
+              dropMessage = `\n🎁 ¡Drop especial! Recibiste **${itemData.name}**`;
+            }
+
+            const victoryEmbed = new EmbedBuilder()
+              .setTitle('🏆 ¡VICTORIA!')
+              .setDescription(`Has derrotado al ${difficultyData.name}!`)
+              .addFields(
+                { name: '💰 Koku ganado', value: `+${kokuReward} koku`, inline: true },
+                { name: '⭐ Honor ganado', value: `+${honorReward} honor`, inline: true }
+              )
+              .setColor('#FFD700');
+
+            return buttonInteraction.update({
+              content: `${EMOJIS.SUCCESS} ¡Victoria! ${result.reason}${dropMessage}`,
+              embeds: [victoryEmbed],
+              components: []
+            });
+          } else {
+            // Derrota
+            const defeatEmbed = new EmbedBuilder()
+              .setTitle('💀 DERROTA')
+              .setDescription(`Has sido derrotado por el ${difficultyData.name}...`)
+              .addFields(
+                { name: '💸 Koku perdido', value: `-${difficultyData.entryCost} koku (entrada)`, inline: true }
+              )
+              .setColor('#E74C3C');
+
+            return buttonInteraction.update({
+              content: `❌ Derrota. ${result.reason}`,
+              embeds: [defeatEmbed],
+              components: []
+            });
+          }
+        }
+
+        // Turno de la IA
+        const aiAction = combatManager.aiDecideAction(currentDuel);
+        const aiResult = combatManager.processAction(duelId, currentDuel.opponent.userId, aiAction.actionType, aiAction.actionData);
+
+        updateContent += `\n🤖 IA: ${aiResult.message}`;
+
+        // Verificar si la IA terminó el juego
+        if (aiResult.gameOver) {
+          const winner = aiResult.winner === 'challenger';
+
+          if (winner) {
+            const kokuReward = Math.floor(Math.random() * (difficultyData.rewards.koku.max - difficultyData.rewards.koku.min + 1)) + difficultyData.rewards.koku.min;
+            const honorReward = Math.floor(Math.random() * (difficultyData.rewards.honor.max - difficultyData.rewards.honor.min + 1)) + difficultyData.rewards.honor.min;
+
+            userData.koku += kokuReward;
+            dataManager.addHonor(userId, guildId, honorReward);
+
+            if (!userData.stats.arenaWins) userData.stats.arenaWins = 0;
+            userData.stats.arenaWins++;
+            dataManager.updateUser(userId, guildId, { stats: userData.stats, koku: userData.koku });
+
+            let dropMessage = '';
+            if (Math.random() < difficultyData.rewards.consumableChance) {
+              const dropItem = CONSTANTS.ARENA.CONSUMABLE_DROPS[Math.floor(Math.random() * CONSTANTS.ARENA.CONSUMABLE_DROPS.length)];
+              dataManager.addConsumable(userId, guildId, dropItem, 1);
+              const itemData = CONSTANTS.COMBAT.CONSUMABLES[dropItem.toUpperCase()];
+              dropMessage = `\n🎁 ¡Drop especial! Recibiste **${itemData.name}**`;
+            }
+
+            const victoryEmbed = new EmbedBuilder()
+              .setTitle('🏆 ¡VICTORIA!')
+              .setDescription(`Has derrotado al ${difficultyData.name}!`)
+              .addFields(
+                { name: '💰 Koku ganado', value: `+${kokuReward} koku`, inline: true },
+                { name: '⭐ Honor ganado', value: `+${honorReward} honor`, inline: true }
+              )
+              .setColor('#FFD700');
+
+            return buttonInteraction.update({
+              content: `${updateContent}\n\n${EMOJIS.SUCCESS} ¡Victoria! ${aiResult.reason}${dropMessage}`,
+              embeds: [victoryEmbed],
+              components: []
+            });
+          } else {
+            const defeatEmbed = new EmbedBuilder()
+              .setTitle('💀 DERROTA')
+              .setDescription(`Has sido derrotado por el ${difficultyData.name}...`)
+              .addFields(
+                { name: '💸 Koku perdido', value: `-${difficultyData.entryCost} koku (entrada)`, inline: true }
+              )
+              .setColor('#E74C3C');
+
+            return buttonInteraction.update({
+              content: `${updateContent}\n\n❌ Derrota. ${aiResult.reason}`,
+              embeds: [defeatEmbed],
+              components: []
+            });
+          }
+        }
+
+        // Continuar combate - actualizar estado
+        const updatedDuel = combatManager.getDuel(duelId);
+        const updatedEmbed = combatManager.generateCombatEmbed(updatedDuel);
+        const updatedButtons = combatManager.generateCombatButtons(updatedDuel.challenger);
+
+        await buttonInteraction.update({
+          content: updateContent,
+          embeds: [updatedEmbed],
+          components: updatedButtons
+        });
+      });
+
+      collector.on('end', (collected, reason) => {
+        if (reason === 'time') {
+          const currentDuel = combatManager.getDuel(duelId);
+          if (currentDuel) {
+            combatManager.endDuel(duelId);
+            interaction.editReply({
+              content: '⏱️ Se acabó el tiempo. Combate cancelado.',
+              components: []
+            }).catch(() => {});
+          }
+        }
+      });
+    }
+
+    // ==================== SISTEMA DE ENTRENAMIENTOS ====================
+
+    else if (commandName === 'entrenar') {
+      // Verificar que el comando se use en el canal correcto
+      const combatChannelId = '1439009626396823594';
+      if (interaction.channel.id !== combatChannelId) {
+        return interaction.reply({
+          content: `❌ El comando \`/entrenar\` solo puede usarse en <#${combatChannelId}>.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const statType = interaction.options.getString('stat');
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+
+      // Si no se especificó stat, mostrar dropdown
+      if (!statType) {
+        const userData = dataManager.getUser(userId, guildId);
+        const training = userData.combat?.training || { strength: 0, agility: 0, ki_mastery: 0, vitality: 0 };
+
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId('training_stat_select')
+          .setPlaceholder('Selecciona el stat a entrenar')
+          .setMinValues(1)
+          .setMaxValues(1)
+          .addOptions(
+            {
+              label: 'Fuerza (+1% daño por nivel)',
+              description: `Nivel actual: ${training.strength}/20 | Costo: ${CONSTANTS.getTrainingCost('strength', training.strength)} koku`,
+              value: 'strength',
+              emoji: '💪'
+            },
+            {
+              label: 'Agilidad (+2% evasión por nivel)',
+              description: `Nivel actual: ${training.agility}/15 | Costo: ${CONSTANTS.getTrainingCost('agility', training.agility)} koku`,
+              value: 'agility',
+              emoji: '🏃'
+            },
+            {
+              label: 'Meditación Ki (+1 Ki máximo por nivel)',
+              description: `Nivel actual: ${training.ki_mastery}/5 | Costo: ${CONSTANTS.getTrainingCost('ki_mastery', training.ki_mastery)} koku`,
+              value: 'ki_mastery',
+              emoji: '🧘'
+            },
+            {
+              label: 'Resistencia (+5 HP por nivel)',
+              description: `Nivel actual: ${training.vitality}/10 | Costo: ${CONSTANTS.getTrainingCost('vitality', training.vitality)} koku`,
+              value: 'vitality',
+              emoji: '❤️'
+            }
+          );
+
+        const row = new ActionRowBuilder().addComponents(selectMenu);
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle('💪 Dojo de Entrenamiento')
+          .setDescription(
+            'Entrena tus stats de combate permanentemente. Cada nivel aumenta tus habilidades en la Arena.\n\n' +
+            '**Stats Disponibles:**\n' +
+            `💪 **Fuerza** (${training.strength}/20) - +1% daño por nivel\n` +
+            `🏃 **Agilidad** (${training.agility}/15) - +2% evasión por nivel\n` +
+            `🧘 **Meditación Ki** (${training.ki_mastery}/5) - +1 Ki máximo por nivel\n` +
+            `❤️ **Resistencia** (${training.vitality}/10) - +5 HP por nivel\n\n` +
+            `💰 **Tu koku:** ${userData.koku.toLocaleString()}`
+          )
+          .setFooter({ text: 'Selecciona un stat del menú desplegable' })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+
+        // Crear collector para el dropdown
+        const message = await interaction.fetchReply();
+        const collector = message.createMessageComponentCollector({
+          filter: (i) => i.user.id === userId && i.customId === 'training_stat_select',
+          time: 60000
+        });
+
+        collector.on('collect', async (i) => {
+          const selectedStat = i.values[0];
+
+          await i.deferUpdate();
+
+          // Obtener datos actualizados
+          const updatedUserData = dataManager.getUser(userId, guildId);
+          const selectedTraining = CONSTANTS.TRAINING.TYPES[selectedStat.toUpperCase()];
+
+          if (!selectedTraining) {
+            return i.followUp({
+              content: '❌ Tipo de entrenamiento inválido.',
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Obtener nivel actual
+          const currentLevel = updatedUserData.combat?.training?.[selectedStat] || 0;
+
+          // Verificar nivel máximo
+          if (currentLevel >= selectedTraining.maxLevel) {
+            return i.followUp({
+              content: `❌ Ya alcanzaste el nivel máximo de **${selectedTraining.name}** (${selectedTraining.maxLevel}).`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Calcular costo
+          const cost = CONSTANTS.getTrainingCost(selectedStat, currentLevel);
+
+          // Verificar koku
+          if (updatedUserData.koku < cost) {
+            return i.followUp({
+              content: `❌ No tienes suficiente koku. Necesitas **${cost} koku** para entrenar ${selectedTraining.name} (nivel ${currentLevel + 1}).`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Cobrar y entrenar
+          updatedUserData.koku -= cost;
+          const result = dataManager.trainStat(userId, guildId, selectedStat);
+
+          if (!result.success) {
+            // Reembolsar si falló
+            updatedUserData.koku += cost;
+            dataManager.updateUser(userId, guildId, { koku: updatedUserData.koku });
+
+            return i.followUp({
+              content: `❌ ${result.message}`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Actualizar koku
+          dataManager.updateUser(userId, guildId, { koku: updatedUserData.koku });
+
+          // Mensaje de éxito
+          const successEmbed = new EmbedBuilder()
+            .setTitle(`${selectedTraining.emoji} ${selectedTraining.name}`)
+            .setDescription(`¡Entrenamiento completado!`)
+            .addFields(
+              { name: '📈 Nivel actual', value: `${result.newLevel}/${selectedTraining.maxLevel}`, inline: true },
+              { name: '💰 Costo', value: `-${cost} koku`, inline: true },
+              { name: '💪 Bonus', value: selectedTraining.description, inline: false }
+            )
+            .setColor('#2ECC71');
+
+          await i.editReply({ embeds: [successEmbed], components: [] });
+
+          console.log(`💪 ${interaction.user.tag} entrenó ${selectedStat} a nivel ${result.newLevel}`);
+        });
+
+        collector.on('end', () => {
+          // Timeout del selector
+        });
+
+        return;
+      }
+
+      const userData = dataManager.getUser(userId, guildId);
+      const training = CONSTANTS.TRAINING.TYPES[statType.toUpperCase()];
+
+      if (!training) {
+        return interaction.reply({
+          content: '❌ Tipo de entrenamiento inválido.',
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Obtener nivel actual
+      const currentLevel = userData.combat?.training?.[statType] || 0;
+
+      // Verificar nivel máximo
+      if (currentLevel >= training.maxLevel) {
+        return interaction.reply({
+          content: `❌ Ya alcanzaste el nivel máximo de **${training.name}** (${training.maxLevel}).`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Calcular costo
+      const cost = CONSTANTS.getTrainingCost(statType, currentLevel);
+
+      // Verificar koku
+      if (userData.koku < cost) {
+        return interaction.reply({
+          content: `❌ No tienes suficiente koku. Necesitas **${cost} koku** para entrenar ${training.name} (nivel ${currentLevel + 1}).`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Cobrar y entrenar
+      userData.koku -= cost;
+      const result = dataManager.trainStat(userId, guildId, statType);
+
+      if (!result.success) {
+        // Reembolsar si falló
+        userData.koku += cost;
+        dataManager.updateUser(userId, guildId, { koku: userData.koku });
+
+        return interaction.reply({
+          content: `❌ ${result.message}`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Actualizar koku
+      dataManager.updateUser(userId, guildId, { koku: userData.koku });
+
+      // Mensaje de éxito
+      const embed = new EmbedBuilder()
+        .setTitle(`${training.emoji} ${training.name}`)
+        .setDescription(`¡Entrenamiento completado!`)
+        .addFields(
+          { name: '📈 Nivel actual', value: `${result.newLevel}/${training.maxLevel}`, inline: true },
+          { name: '💰 Costo', value: `-${cost} koku`, inline: true },
+          { name: '💪 Bonus', value: training.description, inline: false }
+        )
+        .setColor('#2ECC71');
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      console.log(`💪 ${interaction.user.tag} entrenó ${statType} a nivel ${result.newLevel}`);
+    }
+
+    // ==================== SISTEMA DE EQUIPAMIENTO ====================
+
+    else if (commandName === 'equipar') {
+      // Verificar que el comando se use en el canal correcto
+      const combatChannelId = '1439009626396823594';
+      if (interaction.channel.id !== combatChannelId) {
+        return interaction.reply({
+          content: `❌ El comando \`/equipar\` solo puede usarse en <#${combatChannelId}>.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const slotType = interaction.options.getString('tipo');
+      const itemId = interaction.options.getString('item');
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+
+      const userData = dataManager.getUser(userId, guildId);
+
+      // Si no especificó item, mostrar opciones
+      if (!itemId) {
+        const items = slotType === 'weapon' ? CONSTANTS.COMBAT.WEAPONS : CONSTANTS.COMBAT.ARMOR;
+
+        // Filtrar items que el usuario posee
+        const ownedItems = Object.values(items).filter(item => {
+          if (item.id === 'none') return true; // Siempre puede desequipar
+          return userData.inventory.some(inv => inv.itemId === item.id);
+        });
+
+        if (ownedItems.length === 0) {
+          return interaction.reply({
+            content: `❌ No tienes ${slotType === 'weapon' ? 'armas' : 'armaduras'} en tu inventario. Compra algunas en \`/tienda\`.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Generar embed con opciones
+        const embed = new EmbedBuilder()
+          .setTitle(`${slotType === 'weapon' ? '⚔️ Armas' : '🛡️ Armaduras'} Disponibles`)
+          .setDescription('Usa `/equipar tipo:arma item:<nombre>` para equipar')
+          .setColor('#3498DB');
+
+        for (const item of ownedItems) {
+          const equipped = userData.combat?.equipment?.[slotType] === item.id ? '✅ ' : '';
+          const bonus = slotType === 'weapon' ? `+${item.damageBonus} daño` : `+${item.hpBonus} HP`;
+          embed.addFields({
+            name: `${equipped}${item.emoji} ${item.name}`,
+            value: `${item.description}\n**Bonus:** ${bonus}`,
+            inline: true
+          });
+        }
+
+        return interaction.reply({
+          embeds: [embed],
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Intentar equipar
+      const success = dataManager.equipItem(userId, guildId, itemId, slotType);
+
+      if (!success) {
+        return interaction.reply({
+          content: `❌ No tienes este item en tu inventario o el ID es inválido.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Obtener info del item equipado
+      const items = slotType === 'weapon' ? CONSTANTS.COMBAT.WEAPONS : CONSTANTS.COMBAT.ARMOR;
+      const item = items[itemId.toUpperCase()];
+
+      if (!item) {
+        return interaction.reply({
+          content: `❌ Item inválido.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle(`${item.emoji} ${item.name}`)
+        .setDescription(`¡${slotType === 'weapon' ? 'Arma' : 'Armadura'} equipada!`)
+        .addFields(
+          { name: '📊 Bonus', value: item.description, inline: false }
+        )
+        .setColor('#2ECC71');
+
+      await interaction.reply({
+        embeds: [embed]
+      });
+
+      console.log(`⚔️ ${interaction.user.tag} equipó ${item.name}`);
     }
 
     // ==================== SISTEMA DE COSMÉTICOS ====================
