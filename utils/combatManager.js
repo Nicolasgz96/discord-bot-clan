@@ -723,22 +723,31 @@ class CombatManager {
 
     const currentTurnPlayer = duel.currentPlayer === 'challenger' ? challenger : opponent;
 
+    // Obtener nombres de usuario
+    const challengerName = challenger.userData?.username || challenger.username || 'Retador';
+    const opponentName = opponent.userData?.username || opponent.username || 'Oponente';
+
+    // Determinar si hay apuesta
+    const footerText = duel.isArenaBattle
+      ? `Turno de: ${duel.currentPlayer === 'challenger' ? challengerName : opponentName}`
+      : `Turno de: ${duel.currentPlayer === 'challenger' ? challengerName : opponentName} | Apuesta: ${duel.bet} honor`;
+
     const embed = new EmbedBuilder()
       .setTitle(`⚔️ DUELO SAMURÁI - Turno ${duel.turn}`)
       .setColor('#E74C3C')
       .addFields(
         {
-          name: `${EMOJIS.MEMBER} Retador`,
+          name: `${EMOJIS.MEMBER} ${challengerName}`,
           value: `❤️ HP: ${challengerHPBar} ${challenger.hp}/${challenger.maxHP}\n⚡ Ki: ${'🔷'.repeat(challenger.ki)}${'⬜'.repeat(challenger.maxKi - challenger.ki)} ${challenger.ki}/${challenger.maxKi}`,
           inline: true
         },
         {
-          name: `${EMOJIS.MEMBER} Oponente`,
+          name: `${EMOJIS.MEMBER} ${opponentName}`,
           value: `❤️ HP: ${opponentHPBar} ${opponent.hp}/${opponent.maxHP}\n⚡ Ki: ${'🔷'.repeat(opponent.ki)}${'⬜'.repeat(opponent.maxKi - opponent.ki)} ${opponent.ki}/${opponent.maxKi}`,
           inline: true
         }
       )
-      .setFooter({ text: `Turno de: ${duel.currentPlayer === 'challenger' ? 'Retador' : 'Oponente'} | Apuesta: ${duel.bet} honor` });
+      .setFooter({ text: footerText });
 
     // Agregar efectos activos
     if (currentTurnPlayer.effects.length > 0) {

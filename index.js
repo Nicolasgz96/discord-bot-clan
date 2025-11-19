@@ -8979,6 +8979,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // Establecer cooldown
           dataManager.setCooldown(userId, 'arena', CONSTANTS.ARENA.COOLDOWN);
 
+          // Agregar username al userData para el combate
+          userData.username = interaction.user.username;
+          userData.userId = userId;
+
           // Crear combate vs IA
           const combatManager = require('./utils/combatManager');
           const duelId = combatManager.createArenaBattle(userData, selectedDifficulty);
@@ -9161,6 +9165,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Establecer cooldown
       dataManager.setCooldown(userId, 'arena', CONSTANTS.ARENA.COOLDOWN);
+
+      // Agregar username al userData para el combate
+      userData.username = interaction.user.username;
+      userData.userId = userId;
 
       // Crear combate vs IA
       const combatManager = require('./utils/combatManager');
