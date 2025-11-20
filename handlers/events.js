@@ -26,6 +26,9 @@ module.exports = {
       'tournament_winner_select'
     ];
 
+    // Excluir event_start_select porque ya se maneja en index.js
+    if (interaction.customId === 'event_start_select') return;
+
     const isEventInteraction = eventInteractionIds.includes(interaction.customId) ||
                                interaction.customId.startsWith('event_vote_select_user:') ||
                                interaction.customId.startsWith('event_');

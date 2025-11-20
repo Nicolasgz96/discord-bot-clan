@@ -1659,12 +1659,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const controlData = await eventManager.generateTournamentControlMessage(event.id, interaction.client);
 
           if (controlData) {
-            await interaction.followUp({
+            const controlMessage = await interaction.followUp({
               content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
               embeds: [controlData.embed],
               components: controlData.components,
-              ephemeral: true
+              ephemeral: true,
+              fetchReply: true
             });
+
+            // Guardar el ID del mensaje de control para referencia futura
+            event.metadata.controlMessageId = controlMessage.id;
+            eventManager.saveEvents();
           }
         }
 
