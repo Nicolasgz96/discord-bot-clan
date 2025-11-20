@@ -6615,6 +6615,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
           }
 
+          // Verificar estado del evento antes de iniciar (para debugging)
+          console.log(`🔍 Intentando iniciar evento "${event.name}" (ID: ${event.id}, Estado: ${event.status}, Participantes: ${event.participants.length})`);
+
           eventManager.startEvent(event.id);
 
           const embed = new EmbedBuilder()
@@ -6758,12 +6761,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: 'También puedes usar: /evento finalizar evento:nombre' })
             .setTimestamp();
 
-          const response = await interaction.reply({
+          await interaction.reply({
             embeds: [embed],
             components: [row],
-            flags: MessageFlags.Ephemeral,
-            fetchReply: true
+            flags: MessageFlags.Ephemeral
           });
+
+          const response = await interaction.fetchReply();
 
           // Create collector for event selection
           const collector = response.createMessageComponentCollector({
@@ -6780,6 +6784,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (!event) {
                   return i.update({
                     content: `${EMOJIS.ERROR} Evento no encontrado.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Verificar que el evento esté activo antes de finalizar
+                if (event.status !== 'active') {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} Solo se pueden finalizar eventos activos. Estado actual: ${event.status}`,
                     embeds: [],
                     components: []
                   });
@@ -6832,11 +6845,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
               }
             } catch (error) {
               console.error(`❌ Error procesando finalización de evento:`, error);
-              await i.update({
-                content: `${EMOJIS.ERROR} Hubo un error al finalizar el evento. Intenta de nuevo.`,
-                embeds: [],
-                components: []
-              });
+              // Si ya se hizo defer, usar editReply; si no, usar update
+              if (i.deferred) {
+                await i.editReply({
+                  content: `${EMOJIS.ERROR} Hubo un error al finalizar el evento: ${error.message}`,
+                  embeds: [],
+                  components: []
+                }).catch(() => {});
+              } else {
+                await i.update({
+                  content: `${EMOJIS.ERROR} Hubo un error al finalizar el evento: ${error.message}`,
+                  embeds: [],
+                  components: []
+                }).catch(() => {});
+              }
             }
           });
 
@@ -6967,12 +6989,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: 'También puedes usar: /evento cancelar evento:nombre' })
             .setTimestamp();
 
-          const response = await interaction.reply({
+          await interaction.reply({
             embeds: [embed],
             components: [row],
-            flags: MessageFlags.Ephemeral,
-            fetchReply: true
+            flags: MessageFlags.Ephemeral
           });
+
+          const response = await interaction.fetchReply();
 
           // Create collector for event selection
           const collector = response.createMessageComponentCollector({
@@ -7008,11 +7031,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
               }
             } catch (error) {
               console.error(`❌ Error procesando cancelación de evento:`, error);
+              // Usar update ya que no se hace defer en este flujo
               await i.update({
                 content: `${EMOJIS.ERROR} ${error.message}`,
                 embeds: [],
                 components: []
-              });
+              }).catch(() => {});
             }
           });
 
