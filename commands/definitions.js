@@ -952,6 +952,25 @@ const commands = [
             .setDescription('Usuario cuya construcción quieres votar (opcional con menú)')
             .setRequired(false)
         )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('test')
+        .setDescription('🧪 Crear evento de prueba con usuarios ficticios (Solo Administradores)')
+        .addIntegerOption(option =>
+          option
+            .setName('participantes')
+            .setDescription('Número de participantes ficticios (3-16)')
+            .setRequired(false)
+            .setMinValue(3)
+            .setMaxValue(16)
+        )
+        .addStringOption(option =>
+          option
+            .setName('nombre')
+            .setDescription('Nombre del torneo de prueba')
+            .setRequired(false)
+        )
     ),
 
   // ==================== SISTEMA DE TORNEOS PVP ====================

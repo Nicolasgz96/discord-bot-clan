@@ -1417,43 +1417,49 @@ class EventManager {
     const EMOJIS = require('../src/config/emojis');
     const COLORS = require('../src/config/colors');
 
-    // Obtener usuarios de Discord
-    const player1 = await client.users.fetch(match.player1).catch(() => null);
-    const player2 = await client.users.fetch(match.player2).catch(() => null);
+    // Verificar si son usuarios ficticios (de prueba)
+    const isTestUser1 = match.player1.startsWith('test_');
+    const isTestUser2 = match.player2.startsWith('test_');
+
+    // Obtener usuarios de Discord (solo si NO son ficticios)
+    const player1 = !isTestUser1 ? await client.users.fetch(match.player1).catch(() => null) : null;
+    const player2 = !isTestUser2 ? await client.users.fetch(match.player2).catch(() => null) : null;
 
     // Obtener guild correcto usando el guildId proporcionado
     let guild = null;
-    if (guildId) {
+    if (guildId && (!isTestUser1 || !isTestUser2)) {
       guild = client.guilds.cache.get(guildId);
       console.log(`🔍 Buscando servidor con ID: ${guildId} - ${guild ? `✅ Encontrado: ${guild.name}` : '❌ NO ENCONTRADO'}`);
-    } else {
+    } else if (!isTestUser1 || !isTestUser2) {
       guild = client.guilds.cache.first();
       console.log(`⚠️ No se proporcionó guildId, usando primer servidor: ${guild ? guild.name : 'ninguno'}`);
     }
 
-    if (!guild) {
+    if (!guild && (!isTestUser1 || !isTestUser2)) {
       const availableGuilds = Array.from(client.guilds.cache.entries()).map(([id, g]) => `${id} (${g.name})`);
       console.log(`❌ ERROR: No se pudo obtener el servidor. Servidores en cache: ${availableGuilds.join(', ')}`);
     }
 
-    const member1 = guild ? await guild.members.fetch(match.player1).catch((e) => {
+    const member1 = (!isTestUser1 && guild) ? await guild.members.fetch(match.player1).catch((e) => {
       console.log(`⚠️ No se pudo obtener member1 (${match.player1}): ${e.message}`);
       return null;
     }) : null;
-    const member2 = guild ? await guild.members.fetch(match.player2).catch((e) => {
+    const member2 = (!isTestUser2 && guild) ? await guild.members.fetch(match.player2).catch((e) => {
       console.log(`⚠️ No se pudo obtener member2 (${match.player2}): ${e.message}`);
       return null;
     }) : null;
 
-    // MEJORA 4: Usar displayName (nick del servidor) si está disponible
-    const p1Name = member1 ? member1.displayName : (player1 ? player1.username : match.player1);
-    const p2Name = member2 ? member2.displayName : (player2 ? player2.username : match.player2);
+    // Obtener nombres (usar await getDisplayName para manejar usuarios ficticios)
+    const p1Name = isTestUser1 ? await this.getDisplayName(client, guildId, match.player1) :
+                   (member1 ? member1.displayName : (player1 ? player1.username : match.player1));
+    const p2Name = isTestUser2 ? await this.getDisplayName(client, guildId, match.player2) :
+                   (member2 ? member2.displayName : (player2 ? player2.username : match.player2));
 
-    console.log(`🏷️ Nombres finales - P1: "${p1Name}" (displayName: ${member1?.displayName || 'N/A'}), P2: "${p2Name}" (displayName: ${member2?.displayName || 'N/A'})`);
+    console.log(`🏷️ Nombres finales - P1: "${p1Name}" (test: ${isTestUser1}), P2: "${p2Name}" (test: ${isTestUser2})`);
 
-    // Obtener avatares con tamaño consistente más grande
-    const p1Avatar = player1 ? player1.displayAvatarURL({ size: 256 }) : null;
-    const p2Avatar = player2 ? player2.displayAvatarURL({ size: 256 }) : null;
+    // Obtener avatares (null para usuarios ficticios)
+    const p1Avatar = (!isTestUser1 && player1) ? player1.displayAvatarURL({ size: 256 }) : null;
+    const p2Avatar = (!isTestUser2 && player2) ? player2.displayAvatarURL({ size: 256 }) : null;
 
     // Obtener bio desde customization
     const p1Bio = p1Data?.customization?.bio || 'Un guerrero misterioso...';
@@ -1674,6 +1680,14 @@ class EventManager {
    */
   async getDisplayName(client, guildId, userId) {
     try {
+      // Manejar usuarios ficticios (de prueba)
+      if (userId.startsWith('test_')) {
+        // Extraer el número del ID: test_timestamp_N
+        const parts = userId.split('_');
+        const userNumber = parts[parts.length - 1];
+        return `TestUser_${userNumber}`;
+      }
+
       const guild = client.guilds.cache.get(guildId);
       if (!guild) {
         const user = await client.users.fetch(userId).catch(() => null);

@@ -7614,6 +7614,123 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         }
       }
+
+      // ========== /evento test ==========
+      else if (subcommand === 'test') {
+        // Solo admins pueden crear eventos de prueba
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} Solo los administradores pueden crear eventos de prueba.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const numParticipants = interaction.options.getInteger('participantes') || 5;
+        const eventName = interaction.options.getString('nombre') || `Torneo de Prueba ${Date.now()}`;
+
+        try {
+          await interaction.deferReply();
+
+          // Crear usuarios ficticios con datos realistas
+          const testUsers = [];
+          const testUserIds = [];
+
+          for (let i = 1; i <= numParticipants; i++) {
+            const testUserId = `test_${Date.now()}_${i}`;
+            testUserIds.push(testUserId);
+
+            // Generar stats aleatorios pero realistas
+            const randomHonor = Math.floor(Math.random() * 5000) + 100;
+            const randomKoku = Math.floor(Math.random() * 10000) + 500;
+            const rank = CONSTANTS.calculateRank(randomHonor);
+
+            // Crear perfil de usuario ficticio en dataManager
+            const userData = {
+              honor: randomHonor,
+              koku: randomKoku,
+              rank: rank,
+              messages: Math.floor(Math.random() * 500),
+              voiceTime: Math.floor(Math.random() * 10000),
+              dailyStreak: Math.floor(Math.random() * 30),
+              lastDaily: 0,
+              clanId: null
+            };
+
+            // Guardar en dataManager (simulando usuario real)
+            dataManager.users[guildId] = dataManager.users[guildId] || {};
+            dataManager.users[guildId][testUserId] = userData;
+
+            testUsers.push({
+              id: testUserId,
+              name: `TestUser_${i}`,
+              honor: randomHonor,
+              koku: randomKoku,
+              rank: rank
+            });
+          }
+
+          // Guardar datos
+          dataManager.saveData();
+
+          // Crear evento de torneo con usuarios ficticios
+          const event = eventManager.createEvent(
+            'duel_tournament',
+            eventName,
+            `🧪 Evento de prueba con ${numParticipants} participantes ficticios`,
+            guildId,
+            userId,
+            2, // 2 horas de duración
+            numParticipants
+          );
+
+          // Añadir todos los usuarios ficticios al evento
+          for (const testUserId of testUserIds) {
+            eventManager.joinEvent(event.id, testUserId);
+          }
+
+          // Responder con información del evento
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle('🧪 Evento de Prueba Creado')
+            .setDescription(
+              `**${eventName}**\n\n` +
+              `Se ha creado un torneo de prueba con participantes ficticios.\n\n` +
+              `**ID del Evento:** \`${event.id}\`\n` +
+              `**Tipo:** ${event.emoji} Torneo de Duelos\n` +
+              `**Participantes:** ${numParticipants}`
+            )
+            .addFields(
+              {
+                name: '👥 Participantes Ficticios',
+                value: testUsers.map((u, idx) =>
+                  `${idx + 1}. **${u.name}** - ${EMOJIS[u.rank.toUpperCase()] || '🥷'} ${u.rank} (${u.honor} honor)`
+                ).join('\n').substring(0, 1024),
+                inline: false
+              },
+              {
+                name: '🎮 Siguiente Paso',
+                value: `Usa \`/evento iniciar evento:${event.id}\` para comenzar el torneo de prueba.`,
+                inline: false
+              },
+              {
+                name: '⚠️ Nota',
+                value: 'Los usuarios ficticios se comportan exactamente como usuarios reales. Puedes declarar ganadores desde el panel de control.',
+                inline: false
+              }
+            )
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.editReply({ embeds: [embed] });
+
+          console.log(`🧪 ${interaction.user.tag} creó evento de prueba: ${eventName} con ${numParticipants} participantes`);
+        } catch (error) {
+          console.error('Error creando evento de prueba:', error);
+          await interaction.editReply({
+            content: `${EMOJIS.ERROR} Error al crear evento de prueba: ${error.message}`
+          });
+        }
+      }
     }
 
     // ==================== FASE 7: SISTEMA DE TRADUCCIÓN ====================
