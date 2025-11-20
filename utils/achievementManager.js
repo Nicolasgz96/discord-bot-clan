@@ -753,7 +753,8 @@ function getRarestAchievement(userId, guildId) {
  */
 async function createOrGetAchievementRole(guild, achievement) {
   try {
-    const roleName = `🏆 ${achievement.name}`;
+    // Use achievement's own emoji instead of generic trophy
+    const roleName = `${achievement.emoji} ${achievement.name}`;
     const tierInfo = TIER_INFO[achievement.tier];
 
     // Check if role already exists
