@@ -997,7 +997,7 @@ class EventManager {
     bracketText += headerLine + '\n';
     bracketText += '─'.repeat(Math.min(headerLine.length, 50)) + '\n\n';
 
-    // Generar el árbol visual
+    // Generar el árbol visual - Ronda 1 (Cuartos/Octavos)
     const round1Matches = roundsData[1] || [];
     for (let i = 0; i < round1Matches.length; i++) {
       const match = round1Matches[i];
@@ -1007,20 +1007,35 @@ class EventManager {
       const p1Mark = match.winner === match.player1 ? '✅' : (match.winner ? '❌' : '⏳');
       const p2Mark = match.winner === match.player2 ? '✅' : (match.winner ? '❌' : '⏳');
 
-      // Primera línea del match
       bracketText += `${p1Name} ${p1Mark} ─╮\n`;
 
-      // Conectar a siguiente ronda
-      if (match.winner) {
-        const nextRound = round1Matches.length > 1 ? 2 : currentRound;
+      // Conectar a siguiente ronda (semifinales)
+      if (match.winner && roundsData[2]) {
         const winnerName = (playerNames[match.winner] || 'Ganador').substring(0, 8).padEnd(8);
-        const nextMatch = roundsData[nextRound]?.find(m => m.player1 === match.winner || m.player2 === match.winner);
+        const semiMatch = roundsData[2].find(m => m.player1 === match.winner || m.player2 === match.winner);
+        const semiMark = semiMatch?.winner === match.winner ? '✅' : (semiMatch?.winner ? '❌' : '⏳');
 
         if (i % 2 === 1 || round1Matches.length === 1) {
-          const nextMark = nextMatch?.winner === match.winner ? '✅' : (nextMatch?.winner ? '❌' : '⏳');
-          bracketText += `            ├─→ ${winnerName} ${nextMark} ─╮\n`;
+          // Par de combates completo - conectar a semifinal
+          bracketText += `            ├─→ ${winnerName} ${semiMark}`;
+
+          // Si hay final, conectar desde semifinal
+          if (roundsData[3] && semiMatch?.winner) {
+            const finalMatch = roundsData[3].find(m => m.player1 === semiMatch.winner || m.player2 === semiMatch.winner);
+            const finalMark = finalMatch?.winner === semiMatch.winner ? '✅' : (finalMatch?.winner ? '❌' : '⏳');
+            const semiWinnerName = (playerNames[semiMatch.winner] || 'Finalista').substring(0, 9).padEnd(9);
+
+            if (i === 1 || (i === round1Matches.length - 1 && round1Matches.length <= 2)) {
+              bracketText += ` ─╮\n`;
+              bracketText += `                                        ├─→ ${semiWinnerName} ${finalMark}\n`;
+            } else {
+              bracketText += ` ─╮\n`;
+            }
+          } else {
+            bracketText += ` ─╮\n`;
+          }
         } else {
-          bracketText += `            ├─→ ${winnerName} ⏳\n`;
+          bracketText += `            ├─→ ${winnerName} ${semiMark}\n`;
         }
       } else {
         bracketText += `            ├─→\n`;
@@ -1028,7 +1043,6 @@ class EventManager {
 
       bracketText += `${p2Name} ${p2Mark} ─╯\n`;
 
-      // Espaciado entre grupos
       if (i < round1Matches.length - 1 && i % 2 === 1) {
         bracketText += '\n';
       }
@@ -1039,13 +1053,13 @@ class EventManager {
     if (allMatchesCompleted) {
       const finalMatch = bracket.find(m => m.round === currentRound && m.winner);
       if (finalMatch && finalMatch.winner) {
-        const champName = (playerNames[finalMatch.winner] || 'Campeón').substring(0, 12).padEnd(12);
-        bracketText += `\n                                ├─→ 👑 ${champName}\n`;
+        const champName = (playerNames[finalMatch.winner] || 'Campeón').substring(0, 10).padEnd(10);
+        bracketText += `\n                                                            ├─→ 👑 ${champName}\n`;
       } else {
-        bracketText += `\n                                ├─→ 👑 ???\n`;
+        bracketText += `\n                                                            ├─→ 👑 ???\n`;
       }
     } else {
-      bracketText += `\n                                ├─→ 👑 ???\n`;
+      bracketText += `\n                                                            ├─→ 👑 ???\n`;
     }
 
     bracketText += '\n╚═════════════════════════════════════════╝\n';
@@ -1184,9 +1198,32 @@ class EventManager {
           const runnerUpId = finalMatch.player1 === finalMatch.winner ? finalMatch.player2 : finalMatch.player1;
           const runnerUpName = await this.getDisplayName(client, guildId, runnerUpId);
 
+          // Encontrar tercer puesto (perdedor de semifinal que no llegó a la final)
+          let podiumText = `🥇 **Campeón:** ${championName}\n🥈 **Subcampeón:** ${runnerUpName}`;
+
+          if (currentRound > 1) {
+            // Buscar semifinales (ronda anterior)
+            const semiFinalsRound = currentRound - 1;
+            const semiFinals = bracket.filter(m => m.round === semiFinalsRound && m.winner);
+
+            // Encontrar los perdedores de semifinales (excluir al subcampeón)
+            const thirdPlaceCandidates = [];
+            for (const match of semiFinals) {
+              const loserId = match.player1 === match.winner ? match.player2 : match.player1;
+              if (loserId !== runnerUpId) {
+                thirdPlaceCandidates.push(loserId);
+              }
+            }
+
+            if (thirdPlaceCandidates.length > 0) {
+              const thirdPlaceName = await this.getDisplayName(client, guildId, thirdPlaceCandidates[0]);
+              podiumText += `\n🥉 **Tercer Puesto:** ${thirdPlaceName}`;
+            }
+          }
+
           embed.addFields({
             name: '👑 ¡Torneo Completado!',
-            value: `🥇 **Campeón:** ${championName}\n🥈 **Subcampeón:** ${runnerUpName}`,
+            value: podiumText,
             inline: false
           });
         }
