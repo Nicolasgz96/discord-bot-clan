@@ -617,6 +617,339 @@ class EventManager {
 
     return removed;
   }
+
+  /**
+   * Genera embed VS para combate de torneo con avatares en las esquinas
+   * @param {Object} match - Datos del combate { player1, player2, winner, round }
+   * @param {Object} p1Data - Datos del jugador 1 (userData)
+   * @param {Object} p2Data - Datos del jugador 2 (userData)
+   * @param {Client} client - Cliente de Discord
+   * @param {string} guildId - ID del servidor
+   * @returns {Promise<EmbedBuilder>} Embed del combate
+   */
+  async generateMatchVSEmbed(match, p1Data, p2Data, client, guildId = null) {
+    const { EmbedBuilder } = require('discord.js');
+    const EMOJIS = require('../src/config/emojis');
+    const COLORS = require('../src/config/colors');
+
+    // Obtener usuarios de Discord
+    const player1 = await client.users.fetch(match.player1).catch(() => null);
+    const player2 = await client.users.fetch(match.player2).catch(() => null);
+
+    // Obtener guild correcto usando el guildId proporcionado
+    let guild = null;
+    if (guildId) {
+      guild = client.guilds.cache.get(guildId);
+      console.log(`🔍 Buscando servidor con ID: ${guildId} - ${guild ? `✅ Encontrado: ${guild.name}` : '❌ NO ENCONTRADO'}`);
+    } else {
+      guild = client.guilds.cache.first();
+      console.log(`⚠️ No se proporcionó guildId, usando primer servidor: ${guild ? guild.name : 'ninguno'}`);
+    }
+
+    if (!guild) {
+      const availableGuilds = Array.from(client.guilds.cache.entries()).map(([id, g]) => `${id} (${g.name})`);
+      console.log(`❌ ERROR: No se pudo obtener el servidor. Servidores en cache: ${availableGuilds.join(', ')}`);
+    }
+
+    const member1 = guild ? await guild.members.fetch(match.player1).catch((e) => {
+      console.log(`⚠️ No se pudo obtener member1 (${match.player1}): ${e.message}`);
+      return null;
+    }) : null;
+    const member2 = guild ? await guild.members.fetch(match.player2).catch((e) => {
+      console.log(`⚠️ No se pudo obtener member2 (${match.player2}): ${e.message}`);
+      return null;
+    }) : null;
+
+    // MEJORA 4: Usar displayName (nick del servidor) si está disponible
+    const p1Name = member1 ? member1.displayName : (player1 ? player1.username : match.player1);
+    const p2Name = member2 ? member2.displayName : (player2 ? player2.username : match.player2);
+
+    console.log(`🏷️ Nombres finales - P1: "${p1Name}" (displayName: ${member1?.displayName || 'N/A'}), P2: "${p2Name}" (displayName: ${member2?.displayName || 'N/A'})`);
+
+    // Obtener avatares con tamaño consistente más grande
+    const p1Avatar = player1 ? player1.displayAvatarURL({ size: 256 }) : null;
+    const p2Avatar = player2 ? player2.displayAvatarURL({ size: 256 }) : null;
+
+    // Obtener bio desde customization
+    const p1Bio = p1Data?.customization?.bio || 'Un guerrero misterioso...';
+    const p2Bio = p2Data?.customization?.bio || 'Un guerrero misterioso...';
+
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.COMBAT || '#FF6B35')
+      .setTitle(`${EMOJIS.COMBAT || '⚔️'} COMBATE DE TORNEO ${EMOJIS.COMBAT || '⚔️'}`)
+      .setDescription('Dos guerreros se enfrentan en batalla')
+      .addFields(
+        {
+          name: `⚔️ Jugador 1`,
+          value:
+            `**Nombre:** ${p1Name}\n` +
+            `**Rango:** ${p1Data?.rank || 'Ronin'}\n` +
+            `**Honor:** ${p1Data?.honor || 0}\n` +
+            `**Bio:** *"${p1Bio}"*`,
+          inline: true
+        },
+        {
+          name: '⚡',
+          value: '**VS**',
+          inline: true
+        },
+        {
+          name: `⚔️ Jugador 2`,
+          value:
+            `**Nombre:** ${p2Name}\n` +
+            `**Rango:** ${p2Data?.rank || 'Ronin'}\n` +
+            `**Honor:** ${p2Data?.honor || 0}\n` +
+            `**Bio:** *"${p2Bio}"*`,
+          inline: true
+        }
+      )
+      .setTimestamp();
+
+    // Avatar pequeño del Jugador 1 en author (esquina superior izquierda)
+    if (p1Avatar) {
+      embed.setAuthor({
+        name: p1Name,
+        iconURL: p1Avatar
+      });
+    }
+
+    // Avatar mediano del Jugador 2 en thumbnail (esquina superior derecha)
+    if (p2Avatar) {
+      embed.setThumbnail(p2Avatar);
+    }
+
+    return embed;
+  }
+
+  /**
+   * Genera mensaje de control del torneo (solo para creador)
+   * @param {string} eventId - ID del evento
+   * @param {Client} client - Cliente de Discord
+   * @returns {Promise<Object>} { embed, components }
+   */
+  async generateTournamentControlMessage(eventId, client) {
+    const event = this.getEvent(eventId);
+    if (!event || event.type !== EVENT_TYPES.DUEL_TOURNAMENT) return null;
+
+    const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
+    const EMOJIS = require('../src/config/emojis');
+    const COLORS = require('../src/config/colors');
+
+    const bracket = event.metadata.bracket;
+    const currentRound = Math.max(...bracket.map(m => m.round));
+
+    // Encontrar combate actual (sin ganador y con ambos jugadores)
+    const currentMatch = bracket.find(m =>
+      m.round === currentRound &&
+      !m.winner &&
+      m.player2
+    );
+
+    if (!currentMatch) {
+      // No hay más combates, torneo terminado
+      console.log(`🏁 generateTournamentControlMessage: No hay combates pendientes, retornando null`);
+      return null;
+    }
+
+    // Obtener guild correcto para displayNames
+    const guild = client.guilds.cache.get(event.guildId);
+    console.log(`🔍 [TournamentControl] Servidor: ${event.guildId} - ${guild ? `✅ ${guild.name}` : '❌ NO ENCONTRADO'}`);
+
+    const member1 = guild ? await guild.members.fetch(currentMatch.player1).catch(() => null) : null;
+    const member2 = guild ? await guild.members.fetch(currentMatch.player2).catch(() => null) : null;
+    const user1 = await client.users.fetch(currentMatch.player1).catch(() => null);
+    const user2 = await client.users.fetch(currentMatch.player2).catch(() => null);
+
+    // MEJORA 4: Usar displayName en lugar de username
+    const p1Name = member1 ? member1.displayName : (user1 ? user1.username : currentMatch.player1);
+    const p2Name = member2 ? member2.displayName : (user2 ? user2.username : currentMatch.player2);
+
+    console.log(`🏷️ [TournamentControl] P1: "${p1Name}" (displayName: ${member1?.displayName || 'N/A'}), P2: "${p2Name}" (displayName: ${member2?.displayName || 'N/A'})`);
+
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.PRIMARY)
+      .setTitle('🏆 Resultado del Torneo')
+      .setDescription(
+        `**Combate Actual: Ronda ${currentRound}**\n\n` +
+        `${EMOJIS.KATANA || '⚔️'} **${p1Name}** VS **${p2Name}** ${EMOJIS.KATANA || '⚔️'}\n\n` +
+        `Selecciona el ganador del dropdown abajo.`
+      )
+      .setFooter({ text: 'Solo el creador del evento puede registrar resultados' });
+
+    // Dropdown con los 2 participantes
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('tournament_winner_select')
+      .setPlaceholder('Selecciona el ganador del combate')
+      .addOptions(
+        new StringSelectMenuOptionBuilder()
+          .setLabel(p1Name)
+          .setValue(currentMatch.player1)
+          .setEmoji(EMOJIS.KATANA || '⚔️'),
+        new StringSelectMenuOptionBuilder()
+          .setLabel(p2Name)
+          .setValue(currentMatch.player2)
+          .setEmoji(EMOJIS.KATANA || '⚔️')
+      );
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
+
+    return {
+      embed,
+      components: [row]
+    };
+  }
+
+  /**
+   * Registra el ganador de un combate de torneo
+   * @param {string} eventId - ID del evento
+   * @param {string} winnerId - ID del ganador
+   * @param {string} loserId - ID del perdedor
+   * @returns {Object} Evento actualizado
+   */
+  recordTournamentWinner(eventId, winnerId, loserId) {
+    const event = this.getEvent(eventId);
+    if (!event || event.type !== EVENT_TYPES.DUEL_TOURNAMENT) {
+      throw new Error('Evento no es un torneo de duelos');
+    }
+
+    const bracket = event.metadata.bracket;
+    const currentRound = Math.max(...bracket.map(m => m.round));
+
+    // Encontrar el combate
+    const match = bracket.find(m =>
+      m.round === currentRound &&
+      !m.winner &&
+      m.player2 &&
+      (m.player1 === winnerId || m.player2 === winnerId) &&
+      (m.player1 === loserId || m.player2 === loserId)
+    );
+
+    if (!match) {
+      throw new Error('No se encontró el combate correspondiente');
+    }
+
+    // Registrar ganador
+    match.winner = winnerId;
+
+    // Actualizar scores (ganador +1 punto)
+    if (!event.results) event.results = {};
+    if (!event.results[winnerId]) event.results[winnerId] = { score: 0, rank: null };
+    event.results[winnerId].score += 1;
+
+    // Verificar si quedan combates en esta ronda
+    const pendingMatchesInRound = bracket.filter(m =>
+      m.round === currentRound &&
+      !m.winner &&
+      m.player2
+    );
+
+    // Si no quedan combates pendientes, crear siguiente ronda
+    if (pendingMatchesInRound.length === 0) {
+      const winners = bracket
+        .filter(m => m.round === currentRound && m.winner)
+        .map(m => m.winner);
+
+      if (winners.length > 1) {
+        // Crear combates de siguiente ronda
+        const nextRound = currentRound + 1;
+        for (let i = 0; i < winners.length; i += 2) {
+          if (i + 1 < winners.length) {
+            bracket.push({
+              player1: winners[i],
+              player2: winners[i + 1],
+              winner: null,
+              round: nextRound
+            });
+          } else {
+            // Bye - avanza automáticamente
+            bracket.push({
+              player1: winners[i],
+              player2: null,
+              winner: winners[i],
+              round: nextRound
+            });
+          }
+        }
+      }
+    }
+
+    // Actualizar rankings
+    this.updateRanks(eventId);
+    this.saveEvents();
+
+    return event;
+  }
+
+  /**
+   * Obtiene el displayName de un usuario en un servidor
+   * @param {Client} client - Cliente de Discord
+   * @param {string} guildId - ID del servidor
+   * @param {string} userId - ID del usuario
+   * @returns {Promise<string>} DisplayName o username
+   */
+  async getDisplayName(client, guildId, userId) {
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        const user = await client.users.fetch(userId).catch(() => null);
+        return user ? user.username : userId;
+      }
+
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (member) {
+        return member.displayName;
+      }
+
+      const user = await client.users.fetch(userId).catch(() => null);
+      return user ? user.username : userId;
+    } catch (error) {
+      return userId;
+    }
+  }
+
+  /**
+   * Genera embed del bracket del torneo
+   * @param {string} eventId - ID del evento
+   * @param {Client} client - Cliente de Discord
+   * @returns {Promise<EmbedBuilder>} Embed del bracket
+   */
+  async generateBracketEmbed(eventId, client) {
+    const event = this.getEvent(eventId);
+    if (!event || event.type !== EVENT_TYPES.DUEL_TOURNAMENT) return null;
+
+    const { EmbedBuilder } = require('discord.js');
+    const EMOJIS = require('../src/config/emojis');
+    const COLORS = require('../src/config/colors');
+
+    const bracket = event.metadata.bracket;
+    const currentRound = Math.max(...bracket.map(m => m.round));
+
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.PRIMARY)
+      .setTitle(`${EMOJIS.TOURNAMENT || '🏆'} Bracket del Torneo: ${event.name}`)
+      .setDescription(`**Ronda Actual:** ${currentRound}`);
+
+    // Agrupar por rondas
+    for (let round = 1; round <= currentRound; round++) {
+      const matchesInRound = bracket.filter(m => m.round === round);
+      const matchesText = await Promise.all(matchesInRound.map(async (match, idx) => {
+        const p1Name = await this.getDisplayName(client, event.guildId, match.player1);
+        const p2Name = match.player2 ? await this.getDisplayName(client, event.guildId, match.player2) : 'BYE';
+        const winnerMark = match.winner ? (match.winner === match.player1 ? '✅' : '❌') : '⏳';
+        const loserMark = match.winner ? (match.winner === match.player2 ? '✅' : '❌') : '⏳';
+
+        return `\`${idx + 1}.\` ${winnerMark} **${p1Name}** vs ${loserMark} **${p2Name}**`;
+      }));
+
+      embed.addFields({
+        name: `⚔️ Ronda ${round}`,
+        value: matchesText.join('\n') || 'Sin combates',
+        inline: false
+      });
+    }
+
+    return embed;
+  }
 }
 
 // Singleton instance
