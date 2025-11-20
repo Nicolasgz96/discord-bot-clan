@@ -1522,11 +1522,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Registrar ganador
       eventManager.recordTournamentWinner(tournament.id, selectedWinner, loser);
 
-      // Anunciar resultado en el canal
-      await interaction.channel.send({
-        content: `🏆 **Resultado:** <@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
-      });
-
       // Actualizar el mensaje del bracket automáticamente (ANTI-SPAM)
       await eventManager.updateBracketMessage(tournament.id, interaction.channel, interaction.client, dataManager, guildId);
 
@@ -1535,27 +1530,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const updatedBracket = updatedTournament.metadata.bracket;
       const updatedCurrentRound = Math.max(...updatedBracket.map(m => m.round));
 
-      // Si la ronda cambió, anunciar nueva ronda
+      // Si la ronda cambió, solo anunciar (el bracket ya muestra los combates)
       if (updatedCurrentRound > currentRound) {
         const newRoundMatches = updatedBracket.filter(m => m.round === updatedCurrentRound && !m.winner && m.player2);
 
         if (newRoundMatches.length > 0) {
           await interaction.channel.send({
-            content: `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}** del torneo **${updatedTournament.name}**\n\n**Combates de esta ronda:**`
+            content: `🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}** - Revisa el bracket actualizado arriba`
           });
-
-          // Anunciar cada combate con embed visual
-          for (const match of newRoundMatches) {
-            const p1Data = dataManager.getUser(match.player1, guildId);
-            const p2Data = dataManager.getUser(match.player2, guildId);
-            const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client, guildId);
-
-            await interaction.channel.send({ embeds: [matchEmbed] });
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-
-          // Actualizar el bracket después de anunciar la nueva ronda (ANTI-SPAM)
-          await eventManager.updateBracketMessage(tournament.id, interaction.channel, interaction.client, dataManager, guildId);
         }
       }
 
@@ -1655,59 +1637,38 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.update({ embeds: [embed], components: [] });
 
-      // Si es un torneo de duelos, anunciar combates y enviar panel de control
+      // Si es un torneo de duelos, crear bracket y panel de control
       if (event.type === 'duel_tournament' && event.metadata.bracket) {
-        const bracket = event.metadata.bracket;
-        const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
-
-        if (firstRoundMatches.length > 0) {
-          // Anunciar inicio del torneo con combates
-          await interaction.channel.send({
-            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n**Combates de la primera ronda:**`
-          });
-
-          // Anunciar cada combate de la primera ronda
-          for (const match of firstRoundMatches) {
-            const p1Data = dataManager.getUser(match.player1, guildId);
-            const p2Data = dataManager.getUser(match.player2, guildId);
-
-            const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client, guildId);
-            await interaction.channel.send({ embeds: [matchEmbed] });
-
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
-
-          // Enviar mensaje de control (solo visible para el admin)
-          const controlData = await eventManager.generateTournamentControlMessage(event.id, interaction.client);
-
-          if (controlData) {
-            const controlMessage = await interaction.followUp({
-              content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
-              embeds: [controlData.embed],
-              components: controlData.components,
-              ephemeral: true,
-              fetchReply: true
-            });
-
-            // Guardar el ID del mensaje de control para referencia futura
-            event.metadata.controlMessageId = controlMessage.id;
-            eventManager.saveEvents();
-          }
-        }
-
-        // Crear mensaje del bracket (ANTI-SPAM)
+        // Crear mensaje del bracket (que se actualiza automáticamente)
         try {
           const bracketMessage = await interaction.channel.send({
-            content: `📊 **Bracket del Torneo:**\n_Actualizándose automáticamente..._`
+            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n📊 **Bracket del Torneo:**`
           });
 
           event.metadata.bracketMessageId = bracketMessage.id;
           eventManager.saveEvents();
 
-          // Actualizar bracket inmediatamente
+          // Actualizar bracket inmediatamente con todos los datos
           await eventManager.updateBracketMessage(event.id, interaction.channel, interaction.client, dataManager, guildId);
         } catch (bracketError) {
           console.error(`❌ Error creando bracket inicial del torneo:`, bracketError);
+        }
+
+        // Enviar panel de control (solo visible para el admin)
+        const controlData = await eventManager.generateTournamentControlMessage(event.id, interaction.client);
+
+        if (controlData) {
+          const controlMessage = await interaction.followUp({
+            content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
+            embeds: [controlData.embed],
+            components: controlData.components,
+            ephemeral: true,
+            fetchReply: true
+          });
+
+          // Guardar el ID del mensaje de control para referencia futura
+          event.metadata.controlMessageId = controlMessage.id;
+          eventManager.saveEvents();
         }
       }
       // Para eventos que no son torneos, anunciar en el canal
