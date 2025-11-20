@@ -401,7 +401,7 @@ module.exports = {
           }
 
           // Mostrar modal para pedir descripción
-          const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+          const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = require('discord.js');
 
           const modal = new ModalBuilder()
             .setCustomId(`bld_desc:${event.id}:${messageId}:${interaction.channel.id}`)
@@ -415,7 +415,7 @@ module.exports = {
             .setRequired(false)
             .setMaxLength(500);
 
-          const row = new require('discord.js').ActionRowBuilder().addComponents(descriptionInput);
+          const row = new ActionRowBuilder().addComponents(descriptionInput);
           modal.addComponents(row);
 
           await interaction.showModal(modal);
