@@ -2147,10 +2147,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
           timeoutId: timeoutId
         });
 
-        await buttonInteraction.editReply({
-          content: `✅ Se borraron **${totalDeleted}** mensaje(s) de ${userDisplayName}\n💡 Usa \`/deshacerborrado\` en los próximos ${UNDO_TIMEOUT_MINUTES} minutos para restaurarlos.`,
-          components: []
-        });
+        // Intentar editar la respuesta, pero si el token expiró (proceso largo), solo loguear
+        try {
+          await buttonInteraction.editReply({
+            content: `✅ Se borraron **${totalDeleted}** mensaje(s) de ${userDisplayName}\n💡 Usa \`/deshacerborrado\` en los próximos ${UNDO_TIMEOUT_MINUTES} minutos para restaurarlos.`,
+            components: []
+          });
+        } catch (editError) {
+          // Si el token expiró (Unknown Message), solo loguear - los mensajes ya se borraron correctamente
+          if (editError.code === 10008) {
+            console.log(`⚠️ Token de interacción expirado al intentar actualizar mensaje (proceso tomó mucho tiempo), pero los mensajes se borraron correctamente`);
+          } else {
+            console.error(`⚠️ Error al editar respuesta final:`, editError);
+          }
+        }
 
         console.log(`✓ ${interaction.user.tag} borró ${totalDeleted} mensajes de ${userDisplayName} en #${interaction.channel.name} (slash)`);
         channelLocks.delete(interaction.channel.id);
@@ -11508,10 +11518,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
     console.error(`Error ejecutando comando slash ${commandName}:`, error);
     const errorMessage = '❌ Ocurrió un error al ejecutar este comando. Por favor intenta de nuevo más tarde.';
 
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply(errorMessage);
-    } else {
-      await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(errorMessage);
+      } else {
+        await interaction.reply({ content: errorMessage, flags: MessageFlags.Ephemeral });
+      }
+    } catch (replyError) {
+      // Si el token expiró (Unknown Message 10008), ignorar - no podemos responder
+      if (replyError.code !== 10008) {
+        console.error(`Error al enviar mensaje de error:`, replyError);
+      }
     }
   }
 });
