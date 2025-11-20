@@ -1530,6 +1530,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const updatedBracket = updatedTournament.metadata.bracket;
       const nextPendingMatch = updatedBracket.find(m => !m.winner && m.player2);
 
+      // Verificar si se avanzó a nueva ronda
+      const updatedCurrentRound = Math.max(...updatedBracket.map(m => m.round));
+      const isNewRound = updatedCurrentRound > currentRound;
+
       if (nextPendingMatch && updatedTournament.metadata.currentMatchMessageId) {
         try {
           const currentMatchMessage = await interaction.channel.messages.fetch(updatedTournament.metadata.currentMatchMessageId);
@@ -1537,8 +1541,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const p2Data = dataManager.getUser(nextPendingMatch.player2, guildId);
           const matchEmbed = await eventManager.generateMatchVSEmbed(nextPendingMatch, p1Data, p2Data, interaction.client, guildId);
 
+          // Construir content con anuncio de nueva ronda si aplica
+          let content = `⚔️ **TORNEO EN CURSO** ⚔️\n**${updatedTournament.name}**\n`;
+
+          if (isNewRound) {
+            content += `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}**\n`;
+          }
+
+          content += `\n**Combate Actual:**`;
+
           await currentMatchMessage.edit({
-            content: `⚔️ **TORNEO EN CURSO** ⚔️\n**${updatedTournament.name}**\n\n**Combate Actual:**`,
+            content: content,
             embeds: [matchEmbed]
           });
         } catch (err) {
@@ -1566,20 +1579,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
         } catch (err) {
           console.error(`❌ Error actualizando mensaje final:`, err.message);
-        }
-      }
-
-      // Verificar si se avanzó a nueva ronda
-      const updatedCurrentRound = Math.max(...updatedBracket.map(m => m.round));
-
-      // Si la ronda cambió, solo anunciar (el bracket ya muestra los combates)
-      if (updatedCurrentRound > currentRound) {
-        const newRoundMatches = updatedBracket.filter(m => m.round === updatedCurrentRound && !m.winner && m.player2);
-
-        if (newRoundMatches.length > 0) {
-          await interaction.channel.send({
-            content: `🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}** - Revisa el bracket actualizado arriba`
-          });
         }
       }
 
