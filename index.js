@@ -1699,7 +1699,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // (excluir comandos de música y achievements ya que tienen su propia verificación)
   if (config.commandsChannel && config.commandsChannel.enabled && config.commandsChannel.channelId) {
     if (!excludedCommands.includes(commandName) && !musicCommands.includes(commandName) && !achievementsCommands.includes(commandName)) {
-      if (interaction.channel.id !== config.commandsChannel.channelId) {
+      // Permitir /purge en canal específico además del canal de comandos
+      const PURGE_ALLOWED_CHANNEL = '1440375233147047987';
+      const isPurgeInAllowedChannel = commandName === 'purge' && interaction.channel.id === PURGE_ALLOWED_CHANNEL;
+
+      if (interaction.channel.id !== config.commandsChannel.channelId && !isPurgeInAllowedChannel) {
         const commandsChannel = interaction.guild.channels.cache.get(config.commandsChannel.channelId);
         const channelName = commandsChannel ? commandsChannel.name : 'el canal de comandos';
         const channelMention = commandsChannel ? `<#${config.commandsChannel.channelId}>` : 'el canal de comandos';
