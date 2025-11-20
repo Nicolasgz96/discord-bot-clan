@@ -7675,13 +7675,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           // Crear evento de torneo con usuarios ficticios
           const event = eventManager.createEvent(
+            guildId,
             'duel_tournament',
             eventName,
             `🧪 Evento de prueba con ${numParticipants} participantes ficticios`,
-            guildId,
             userId,
-            2, // 2 horas de duración
-            numParticipants
+            {
+              duration: 2,
+              maxParticipants: numParticipants
+            }
           );
 
           // Añadir todos los usuarios ficticios al evento
