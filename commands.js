@@ -312,6 +312,26 @@ const commands = [
         )
     ),
 
+  // SISTEMA DE TORNEOS PVP
+  new SlashCommandBuilder()
+    .setName('torneo')
+    .setDescription('🏆 Sistema de torneos PvP - Compite en brackets eliminatorios')
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('bracket')
+        .setDescription('📊 Ver bracket del torneo activo')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('micombate')
+        .setDescription('⚔️ Ver tu combate pendiente en el torneo')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('registrar')
+        .setDescription('✅ Registrar resultado de tu combate (ambos jugadores deben confirmar)')
+    ),
+
   // SISTEMA DE ENTRENAMIENTOS
   new SlashCommandBuilder()
     .setName('entrenar')

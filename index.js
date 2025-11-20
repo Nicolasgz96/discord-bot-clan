@@ -9574,6 +9574,334 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
     }
 
+    // ==================== SISTEMA DE TORNEOS PVP ====================
+
+    else if (commandName === 'torneo') {
+      const subcommand = interaction.options.getSubcommand();
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+
+      // Obtener evento activo de tipo DUEL_TOURNAMENT
+      const eventManager = require('./utils/eventManager');
+      const activeEvents = eventManager.getActiveEvents(guildId);
+      const activeTournament = activeEvents.find(e => e.type === 'duel_tournament');
+
+      if (subcommand === 'bracket') {
+        if (!activeTournament) {
+          return interaction.reply({
+            content: '❌ No hay ningún torneo activo en este momento.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        try {
+          const bracketData = eventManager.getTournamentBracket(activeTournament.eventId);
+          const { event, rounds, currentRound, totalRounds } = bracketData;
+
+          // Construir embed del bracket
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('🏆 Bracket del Torneo - ' + event.name)
+            .setDescription(
+              `**Participantes:** ${event.participants.length}\n` +
+              `**Ronda Actual:** ${currentRound}/${totalRounds}\n` +
+              `**Estado:** ${event.status === 'active' ? '🟢 Activo' : '⚫ Finalizado'}`
+            )
+            .setTimestamp();
+
+          // Agregar campos para cada ronda
+          for (let round = 1; round <= currentRound; round++) {
+            const matches = rounds[round] || [];
+            let roundText = '';
+
+            for (let i = 0; i < matches.length; i++) {
+              const match = matches[i];
+              const player1 = match.player1 ? `<@${match.player1}>` : 'BYE';
+              const player2 = match.player2 ? `<@${match.player2}>` : 'BYE';
+              const winner = match.winner ? `<@${match.winner}>` : '⏳ Pendiente';
+
+              roundText += `**Combate ${i + 1}:**\n`;
+              roundText += `${player1} vs ${player2}\n`;
+              roundText += `Ganador: ${winner}\n\n`;
+            }
+
+            const roundName = round === currentRound && event.status === 'active'
+              ? `⚔️ Ronda ${round} (ACTUAL)`
+              : `📊 Ronda ${round}`;
+
+            embed.addFields({
+              name: roundName,
+              value: roundText || 'Sin combates',
+              inline: false
+            });
+          }
+
+          // Si el torneo está completo, mostrar ganadores
+          if (event.status === 'completed' && event.results) {
+            const champion = Object.keys(event.results).find(id => event.results[id].rank === 1);
+            const runnerUp = Object.keys(event.results).find(id => event.results[id].rank === 2);
+            const thirdPlace = Object.keys(event.results).find(id => event.results[id].rank === 3);
+
+            let winnersText = '';
+            if (champion) winnersText += `🥇 **Campeón:** <@${champion}>\n`;
+            if (runnerUp) winnersText += `🥈 **Subcampeón:** <@${runnerUp}>\n`;
+            if (thirdPlace) winnersText += `🥉 **Tercer Lugar:** <@${thirdPlace}>\n`;
+
+            if (winnersText) {
+              embed.addFields({
+                name: '🏆 Podio Final',
+                value: winnersText,
+                inline: false
+              });
+            }
+          }
+
+          return interaction.reply({ embeds: [embed] });
+        } catch (error) {
+          console.error('Error al obtener bracket del torneo:', error);
+          return interaction.reply({
+            content: `❌ Error al obtener el bracket: ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      else if (subcommand === 'micombate') {
+        if (!activeTournament) {
+          return interaction.reply({
+            content: '❌ No hay ningún torneo activo en este momento.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar que el usuario está participando
+        if (!activeTournament.participants.includes(userId)) {
+          return interaction.reply({
+            content: '❌ No estás participando en el torneo actual.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        try {
+          const match = eventManager.getUserTournamentMatch(activeTournament.eventId, userId);
+
+          if (!match) {
+            return interaction.reply({
+              content: '⏳ No tienes combates pendientes en este momento. Espera a que termine la ronda actual.',
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const opponent = match.player1 === userId ? match.player2 : match.player1;
+          const opponentMention = opponent ? `<@${opponent}>` : 'BYE';
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.WARNING)
+            .setTitle('⚔️ Tu Combate de Torneo')
+            .setDescription(
+              `Tienes un combate pendiente en el torneo **${activeTournament.name}**.\n\n` +
+              `**Oponente:** ${opponentMention}\n` +
+              `**Ronda:** ${match.round}\n\n` +
+              `Para registrar el resultado:\n` +
+              `1. Completa tu combate con tu oponente\n` +
+              `2. Usa \`/torneo registrar\` para registrar el resultado\n` +
+              `3. Ambos jugadores deben confirmar el ganador`
+            )
+            .setFooter({ text: 'El ganador avanza a la siguiente ronda' })
+            .setTimestamp();
+
+          return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        } catch (error) {
+          console.error('Error al obtener combate del usuario:', error);
+          return interaction.reply({
+            content: `❌ Error: ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      else if (subcommand === 'registrar') {
+        if (!activeTournament) {
+          return interaction.reply({
+            content: '❌ No hay ningún torneo activo en este momento.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar que el usuario está participando
+        if (!activeTournament.participants.includes(userId)) {
+          return interaction.reply({
+            content: '❌ No estás participando en el torneo actual.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        try {
+          const match = eventManager.getUserTournamentMatch(activeTournament.eventId, userId);
+
+          if (!match) {
+            return interaction.reply({
+              content: '❌ No tienes combates pendientes para registrar.',
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const player1 = match.player1;
+          const player2 = match.player2;
+          const opponent = player1 === userId ? player2 : player1;
+
+          // Crear botones para seleccionar ganador
+          const winnerButtons = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`tournament_winner_${userId}`)
+              .setLabel('Yo gané')
+              .setStyle(ButtonStyle.Success)
+              .setEmoji('🏆'),
+            new ButtonBuilder()
+              .setCustomId(`tournament_winner_${opponent}`)
+              .setLabel(`${opponent === player1 ? 'Player 1' : 'Player 2'} ganó`)
+              .setStyle(ButtonStyle.Danger)
+              .setEmoji('💀')
+          );
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.WARNING)
+            .setTitle('⚔️ Registrar Resultado del Combate')
+            .setDescription(
+              `**Tu combate:** <@${player1}> vs <@${player2}>\n\n` +
+              `**Importante:** Ambos jugadores deben confirmar el mismo ganador.\n` +
+              `Selecciona quién ganó el combate:`
+            )
+            .setFooter({ text: 'La confirmación del oponente es necesaria' })
+            .setTimestamp();
+
+          await interaction.reply({
+            embeds: [embed],
+            components: [winnerButtons],
+            flags: MessageFlags.Ephemeral
+          });
+
+          // Crear collector para los botones
+          const message = await interaction.fetchReply();
+          const collector = message.createMessageComponentCollector({
+            filter: (i) => i.user.id === userId,
+            time: 120000
+          });
+
+          collector.on('collect', async (i) => {
+            await i.deferUpdate();
+
+            const selectedWinner = i.customId.replace('tournament_winner_', '');
+            const loser = selectedWinner === player1 ? player2 : player1;
+
+            // Crear clave única para las confirmaciones (usa siempre el mismo orden)
+            const matchKey = [player1, player2].sort().join('_');
+            if (!global.tournamentConfirmations) global.tournamentConfirmations = {};
+            if (!global.tournamentConfirmations[matchKey]) {
+              global.tournamentConfirmations[matchKey] = {};
+            }
+
+            // Registrar voto del usuario actual
+            global.tournamentConfirmations[matchKey][userId] = selectedWinner;
+
+            // Verificar si ambos jugadores votaron
+            const confirmations = global.tournamentConfirmations[matchKey];
+            const votes = Object.keys(confirmations).length;
+
+            if (votes >= 2) {
+              // Ambos votaron, verificar si coinciden
+              const vote1 = confirmations[player1];
+              const vote2 = confirmations[player2];
+
+              if (vote1 === vote2) {
+                // Votos coinciden, registrar ganador
+                try {
+                  eventManager.recordTournamentWinner(activeTournament.eventId, selectedWinner, loser);
+
+                  // Limpiar confirmaciones
+                  delete global.tournamentConfirmations[matchKey];
+
+                  const successEmbed = new EmbedBuilder()
+                    .setColor(COLORS.SUCCESS)
+                    .setTitle('✅ Resultado Registrado')
+                    .setDescription(
+                      `**Ganador:** <@${selectedWinner}>\n\n` +
+                      `El resultado ha sido confirmado por ambos jugadores.\n` +
+                      `<@${selectedWinner}> avanza a la siguiente ronda!`
+                    )
+                    .setTimestamp();
+
+                  await i.editReply({
+                    embeds: [successEmbed],
+                    components: []
+                  });
+
+                  // Notificar en el canal
+                  await interaction.channel.send({
+                    content: `🏆 **Resultado del Torneo**\n<@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
+                  });
+
+                  collector.stop();
+                } catch (error) {
+                  console.error('Error al registrar ganador del torneo:', error);
+                  await i.editReply({
+                    content: `❌ Error al registrar el resultado: ${error.message}`,
+                    components: []
+                  });
+                }
+              } else {
+                // Votos no coinciden
+                const errorEmbed = new EmbedBuilder()
+                  .setColor(COLORS.ERROR)
+                  .setTitle('❌ Votos no Coinciden')
+                  .setDescription(
+                    `Los dos jugadores seleccionaron ganadores diferentes.\n\n` +
+                    `Por favor, discutan el resultado y vuelvan a intentarlo.\n` +
+                    `Se han borrado los votos anteriores.`
+                  )
+                  .setTimestamp();
+
+                // Limpiar confirmaciones para reintentar
+                delete global.tournamentConfirmations[matchKey];
+
+                await i.editReply({
+                  embeds: [errorEmbed],
+                  components: []
+                });
+                collector.stop();
+              }
+            } else {
+              // Solo un jugador ha votado
+              const waitingEmbed = new EmbedBuilder()
+                .setColor(COLORS.INFO)
+                .setTitle('⏳ Esperando Confirmación')
+                .setDescription(
+                  `Has seleccionado a <@${selectedWinner}> como ganador.\n\n` +
+                  `Esperando a que <@${opponent}> confirme el resultado usando \`/torneo registrar\`.`
+                )
+                .setTimestamp();
+
+              await i.editReply({
+                embeds: [waitingEmbed],
+                components: []
+              });
+              collector.stop();
+            }
+          });
+
+          collector.on('end', () => {
+            // Timeout
+          });
+        } catch (error) {
+          console.error('Error al registrar resultado del torneo:', error);
+          return interaction.reply({
+            content: `❌ Error: ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+    }
+
     // ==================== SISTEMA DE ENTRENAMIENTOS ====================
 
     else if (commandName === 'entrenar') {

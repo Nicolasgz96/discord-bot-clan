@@ -432,6 +432,185 @@ class EventManager {
   }
 
   /**
+   * Record winner of a tournament match
+   */
+  recordTournamentWinner(eventId, winnerId, loserId) {
+    const event = this.getEvent(eventId);
+    if (!event) {
+      throw new Error('Evento no encontrado');
+    }
+
+    if (event.type !== EVENT_TYPES.DUEL_TOURNAMENT) {
+      throw new Error('Este no es un torneo de duelos');
+    }
+
+    if (event.status !== EVENT_STATUS.ACTIVE) {
+      throw new Error('El torneo no está activo');
+    }
+
+    const bracket = event.metadata.bracket;
+
+    // Find the match with these two players in current round
+    const currentRound = Math.max(...bracket.map(m => m.round));
+    const match = bracket.find(m =>
+      m.round === currentRound &&
+      !m.winner &&
+      ((m.player1 === winnerId && m.player2 === loserId) ||
+       (m.player1 === loserId && m.player2 === winnerId))
+    );
+
+    if (!match) {
+      throw new Error('No se encontró un combate pendiente entre estos jugadores en la ronda actual');
+    }
+
+    // Record the winner
+    match.winner = winnerId;
+    match.completedAt = Date.now();
+
+    // Store match in history
+    if (!event.metadata.matches) event.metadata.matches = [];
+    event.metadata.matches.push({
+      round: match.round,
+      player1: match.player1,
+      player2: match.player2,
+      winner: winnerId,
+      timestamp: Date.now()
+    });
+
+    // Check if round is complete
+    const roundMatches = bracket.filter(m => m.round === currentRound);
+    const allMatchesComplete = roundMatches.every(m => m.winner !== null);
+
+    if (allMatchesComplete) {
+      // Advance to next round
+      this.advanceToNextRound(eventId);
+    }
+
+    this.saveEvents();
+    return event;
+  }
+
+  /**
+   * Advance tournament to next round
+   */
+  advanceToNextRound(eventId) {
+    const event = this.getEvent(eventId);
+    if (!event) {
+      throw new Error('Evento no encontrado');
+    }
+
+    const bracket = event.metadata.bracket;
+    const currentRound = Math.max(...bracket.map(m => m.round));
+    const winners = bracket.filter(m => m.round === currentRound && m.winner).map(m => m.winner);
+
+    // Check if tournament is complete (only 1 winner left)
+    if (winners.length === 1) {
+      // Tournament complete!
+      event.status = EVENT_STATUS.COMPLETED;
+      event.endTime = Date.now();
+
+      // Record final standings
+      const finalMatch = bracket.find(m => m.round === currentRound);
+      const champion = winners[0];
+      const runnerUp = finalMatch.player1 === champion ? finalMatch.player2 : finalMatch.player1;
+
+      // Find 3rd place (loser of previous round that isn't the runner-up)
+      let thirdPlace = null;
+      if (currentRound > 1) {
+        const semiFinalists = bracket
+          .filter(m => m.round === currentRound - 1)
+          .flatMap(m => [m.player1, m.player2])
+          .filter(p => p && p !== champion && p !== runnerUp);
+        thirdPlace = semiFinalists[0]; // Take first semi-finalist who lost
+      }
+
+      event.results = {
+        [champion]: { rank: 1, prize: 'champion' },
+        [runnerUp]: { rank: 2, prize: 'runner_up' }
+      };
+
+      if (thirdPlace) {
+        event.results[thirdPlace] = { rank: 3, prize: 'third_place' };
+      }
+
+      this.saveEvents();
+      return { complete: true, champion, runnerUp, thirdPlace };
+    }
+
+    // Create next round matches
+    const nextRound = currentRound + 1;
+    for (let i = 0; i < winners.length; i += 2) {
+      if (i + 1 < winners.length) {
+        bracket.push({
+          player1: winners[i],
+          player2: winners[i + 1],
+          winner: null,
+          round: nextRound
+        });
+      } else {
+        // Bye - player advances automatically
+        bracket.push({
+          player1: winners[i],
+          player2: null,
+          winner: winners[i],
+          round: nextRound
+        });
+      }
+    }
+
+    this.saveEvents();
+    return { complete: false, nextRound, matchesCreated: Math.ceil(winners.length / 2) };
+  }
+
+  /**
+   * Get current tournament bracket formatted
+   */
+  getTournamentBracket(eventId) {
+    const event = this.getEvent(eventId);
+    if (!event || event.type !== EVENT_TYPES.DUEL_TOURNAMENT) {
+      throw new Error('Torneo no encontrado');
+    }
+
+    const bracket = event.metadata.bracket || [];
+    const rounds = {};
+
+    // Group matches by round
+    for (const match of bracket) {
+      if (!rounds[match.round]) rounds[match.round] = [];
+      rounds[match.round].push(match);
+    }
+
+    return {
+      event,
+      rounds,
+      currentRound: bracket.length > 0 ? Math.max(...bracket.map(m => m.round)) : 0,
+      totalRounds: Math.ceil(Math.log2(event.participants.length))
+    };
+  }
+
+  /**
+   * Get user's current tournament match
+   */
+  getUserTournamentMatch(eventId, userId) {
+    const event = this.getEvent(eventId);
+    if (!event || event.type !== EVENT_TYPES.DUEL_TOURNAMENT) {
+      return null;
+    }
+
+    const bracket = event.metadata.bracket || [];
+    const currentRound = bracket.length > 0 ? Math.max(...bracket.map(m => m.round)) : 0;
+
+    // Find user's match in current round
+    const match = bracket.find(m =>
+      m.round === currentRound &&
+      !m.winner &&
+      (m.player1 === userId || m.player2 === userId)
+    );
+
+    return match;
+  }
+
+  /**
    * Submit building contest entry
    */
   submitBuildingEntry(eventId, userId, imageUrl, description) {
