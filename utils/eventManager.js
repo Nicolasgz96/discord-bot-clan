@@ -307,7 +307,12 @@ class EventManager {
 
     event.status = EVENT_STATUS.COMPLETED;
     event.endTime = Date.now();
+
+    // Eliminar el evento automáticamente después de completarlo
+    delete this.events[eventId];
     this.saveEvents();
+
+    console.log(`🗑️ Evento completado y eliminado: ${event.name} (${eventId})`);
     return event;
   }
 
@@ -325,7 +330,12 @@ class EventManager {
     }
 
     event.status = EVENT_STATUS.CANCELLED;
+
+    // Eliminar el evento automáticamente después de cancelarlo
+    delete this.events[eventId];
     this.saveEvents();
+
+    console.log(`🗑️ Evento cancelado y eliminado: ${event.name} (${eventId})`);
     return event;
   }
 
