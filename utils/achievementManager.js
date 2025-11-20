@@ -295,27 +295,27 @@ const ACHIEVEMENTS = {
 
   recruiter: {
     id: 'recruiter',
-    name: 'Reclutador',
-    nameEn: 'Recruiter',
+    name: 'El Esclavizador',
+    nameEn: 'The Enslaver',
     description: 'Invita 5 personas al servidor',
     category: 'special',
     tier: 'silver',
-    emoji: '📣',
+    emoji: '⛓️',
     requirement: { type: 'invites', count: 5 },
-    reward: { koku: 1000, title: 'Reclutador' },
+    reward: { koku: 1000, title: 'El Esclavizador' },
     hidden: false
   },
 
   master_recruiter: {
     id: 'master_recruiter',
-    name: 'Maestro Reclutador',
-    nameEn: 'Master Recruiter',
+    name: 'Amo Supremo',
+    nameEn: 'Supreme Master',
     description: 'Invita 20 personas al servidor',
     category: 'special',
     tier: 'gold',
-    emoji: '📢',
+    emoji: '👑',
     requirement: { type: 'invites', count: 20 },
-    reward: { koku: 5000, title: 'Cazatalentos' },
+    reward: { koku: 5000, title: 'Amo Supremo' },
     hidden: false
   },
 
