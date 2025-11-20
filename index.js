@@ -6078,7 +6078,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
               `**Estado:** ⏳ Pendiente\n` +
               `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
               `**Participantes:** 0/${event.maxParticipants}\n\n` +
-              `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+              `Usa \`/evento unirse\` para inscribirte.`
             )
             .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
             .setTimestamp();
@@ -6229,7 +6229,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                           `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
                           `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
                           `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
-                          `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                          `Usa \`/evento unirse\` para inscribirte.`
                         )
                         .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
                         .setTimestamp();
@@ -6337,7 +6337,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
                   `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
                   `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
-                  `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                  `Usa \`/evento unirse\` para inscribirte.`
                 )
                 .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
                 .setTimestamp();
@@ -6467,7 +6467,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                           `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
                           `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
                           `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
-                          `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                          `Usa \`/evento unirse\` para inscribirte.`
                         )
                         .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
                         .setTimestamp();
@@ -6559,7 +6559,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
                   `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
                   `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
-                  `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                  `Usa \`/evento unirse\` para inscribirte.`
                 )
                 .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
                 .setTimestamp();
