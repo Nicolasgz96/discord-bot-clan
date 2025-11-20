@@ -1507,7 +1507,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   // Comandos que NO requieren estar en el canal de comandos
-  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'arena', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas'];
+  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'arena', 'torneo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas'];
 
   // Verificar si el comando debe ejecutarse en un canal específico
   // (excluir comandos de música y achievements ya que tienen su propia verificación)
@@ -9577,6 +9577,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
     // ==================== SISTEMA DE TORNEOS PVP ====================
 
     else if (commandName === 'torneo') {
+      // Verificar que el comando se use en el canal correcto
+      const tournamentChannelId = '1440375233147047987';
+      if (interaction.channel.id !== tournamentChannelId) {
+        return interaction.reply({
+          content: `❌ El comando \`/torneo\` solo puede usarse en <#${tournamentChannelId}>.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
       const subcommand = interaction.options.getSubcommand();
       const userId = interaction.user.id;
       const guildId = interaction.guild.id;
