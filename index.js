@@ -7362,21 +7362,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // ========== /evento enviar ==========
       else if (subcommand === 'enviar') {
-        const eventoId = interaction.options.getString('evento');
+        const eventoQuery = interaction.options.getString('evento');
         const imagenUrl = interaction.options.getString('imagen_url');
         const descripcionBuild = interaction.options.getString('descripcion') || 'Sin descripción';
 
         try {
-          const event = eventManager.getEvent(eventoId);
+          // Buscar por ID primero, luego por nombre
+          let event = eventManager.getEvent(eventoQuery);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            // Buscar en eventos de construcción activos
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              e.type === 'building_contest' &&
+              e.status === EVENT_STATUS.ACTIVE
+            );
+          }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento con ID "${eventoId}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento de construcción "${eventoQuery}" activo.`,
               flags: MessageFlags.Ephemeral
             });
           }
 
-          eventManager.submitBuildingEntry(eventoId, userId, imagenUrl, descripcionBuild);
+          console.log(`✅ ${interaction.user.tag} inició evento desde dropdown: ${eventoQuery}`);
+
+          eventManager.submitBuildingEntry(event.id, userId, imagenUrl, descripcionBuild);
 
           const embed = new EmbedBuilder()
             .setColor(COLORS.SUCCESS)
@@ -7589,16 +7601,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         // Original logic when parameters are provided
         try {
-          const event = eventManager.getEvent(eventoId);
+          // Buscar por ID primero, luego por nombre
+          let event = eventManager.getEvent(eventoId);
+          if (!event) {
+            const guildEvents = eventManager.getGuildEvents(guildId);
+            // Buscar en eventos de construcción activos
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoId.toLowerCase() &&
+              e.type === 'building_contest' &&
+              e.status === EVENT_STATUS.ACTIVE
+            );
+          }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento con ID "${eventoId}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento de construcción "${eventoId}" activo.`,
               flags: MessageFlags.Ephemeral
             });
           }
 
-          eventManager.voteBuildingEntry(eventoId, userId, targetUser.id);
+          eventManager.voteBuildingEntry(event.id, userId, targetUser.id);
 
           await interaction.reply({
             content: `${EMOJIS.SUCCESS} Has votado por la construcción de **${targetUser.username}**.`,
