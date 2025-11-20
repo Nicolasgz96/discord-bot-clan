@@ -171,7 +171,7 @@ client.on(Events.MessageCreate, async (message) => {
           );
 
           const selectMenu = new StringSelectMenuBuilder()
-            .setCustomId(`building_submit_event:${userId}:${imageAttachment.url}`)
+            .setCustomId(`building_submit_event:${userId}:${message.id}`)
             .setPlaceholder('📸 Selecciona el evento para esta construcción')
             .addOptions(options);
 

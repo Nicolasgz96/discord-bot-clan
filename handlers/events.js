@@ -360,7 +360,7 @@ module.exports = {
       // ========== Manejo de envío de construcción (selector de evento) ==========
       else if (interaction.customId.startsWith('building_submit_event:') && interaction.isStringSelectMenu()) {
         try {
-          const [, requestUserId, imageUrl] = interaction.customId.split(':');
+          const [, requestUserId, messageId] = interaction.customId.split(':');
 
           // Verificar que sea el usuario correcto
           if (interaction.user.id !== requestUserId) {
@@ -381,11 +381,28 @@ module.exports = {
             });
           }
 
+          // Recuperar la imagen del mensaje original
+          const originalMessage = await interaction.channel.messages.fetch(messageId);
+          const imageAttachment = originalMessage.attachments.find(att =>
+            att.contentType && (
+              att.contentType.startsWith('image/') ||
+              att.url.match(/\.(png|jpg|jpeg|gif|webp)$/i)
+            )
+          );
+
+          if (!imageAttachment) {
+            return interaction.update({
+              content: `${EMOJIS.ERROR} No se pudo encontrar la imagen original.`,
+              embeds: [],
+              components: []
+            });
+          }
+
           // Mostrar modal para pedir descripción
           const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 
           const modal = new ModalBuilder()
-            .setCustomId(`building_submit_description:${event.id}:${imageUrl}`)
+            .setCustomId(`building_submit_description:${event.id}:${messageId}:${interaction.channel.id}`)
             .setTitle(`Descripción - ${event.name}`);
 
           const descriptionInput = new TextInputBuilder()

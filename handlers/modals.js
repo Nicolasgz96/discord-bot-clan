@@ -14,8 +14,7 @@ module.exports = {
     // ========== MODAL: Envío de construcción ==========
     if (interaction.customId.startsWith('building_submit_description:')) {
       try {
-        const [, eventId, ...imageUrlParts] = interaction.customId.split(':');
-        const imageUrl = imageUrlParts.join(':'); // Reconstruir URL que puede tener ":"
+        const [, eventId, messageId, channelId] = interaction.customId.split(':');
         const description = interaction.fields.getTextInputValue('description') || 'Sin descripción';
 
         const { getEventManager } = require('../utils/eventManager');
@@ -32,11 +31,28 @@ module.exports = {
           });
         }
 
+        // Recuperar la imagen del mensaje original
+        const channel = await interaction.client.channels.fetch(channelId);
+        const originalMessage = await channel.messages.fetch(messageId);
+        const imageAttachment = originalMessage.attachments.find(att =>
+          att.contentType && (
+            att.contentType.startsWith('image/') ||
+            att.url.match(/\.(png|jpg|jpeg|gif|webp)$/i)
+          )
+        );
+
+        if (!imageAttachment) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} No se pudo encontrar la imagen original.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
         const userId = interaction.user.id;
         const guildId = interaction.guild.id;
 
         // Enviar construcción
-        eventManager.submitBuildingEntry(eventId, userId, imageUrl, description);
+        eventManager.submitBuildingEntry(eventId, userId, imageAttachment.url, description);
 
         const embed = new EmbedBuilder()
           .setColor(COLORS.SUCCESS)
@@ -46,7 +62,7 @@ module.exports = {
             `**Descripción:** ${description}\n\n` +
             `¡Buena suerte! 🏗️`
           )
-          .setImage(imageUrl)
+          .setImage(imageAttachment.url)
           .setFooter({ text: 'Los participantes podrán votar por tu construcción' })
           .setTimestamp();
 
