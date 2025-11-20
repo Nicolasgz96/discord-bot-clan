@@ -6001,7 +6001,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
             .setTimestamp();
 
-          await interaction.reply({ embeds: [embed] });
+          const message = await interaction.reply({ embeds: [embed], fetchReply: true });
+
+          // Guardar messageId y channelId para poder actualizar el embed cuando se unan participantes
+          event.metadata.announcementMessageId = message.id;
+          event.metadata.announcementChannelId = interaction.channel.id;
+          eventManager.saveEvents();
+
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} creó evento: ${event.name}`);
         } catch (error) {
           console.error('Error creando evento:', error.message);
@@ -6113,6 +6119,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                   await i.update({ embeds: [successEmbed], components: [] });
                   console.log(`${EMOJIS.SUCCESS} ${i.user.tag} se unió al evento: ${event.name}`);
+
+                  // Actualizar mensaje de anuncio del evento
+                  if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+                    try {
+                      const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+                      const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+                      const updatedEmbed = new EmbedBuilder()
+                        .setColor(COLORS.SUCCESS)
+                        .setTitle(`${event.emoji} Evento Creado`)
+                        .setDescription(
+                          `**${event.name}**\n` +
+                          `${event.description}\n\n` +
+                          `**ID:** \`${event.id}\`\n` +
+                          `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                          `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
+                          `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                          `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                          `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                        )
+                        .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                        .setTimestamp();
+
+                      await announcementMessage.edit({ embeds: [updatedEmbed] });
+                    } catch (err) {
+                      console.error('Error actualizando mensaje de anuncio del evento:', err.message);
+                    }
+                  }
+
                   collector.stop('completed');
                 } catch (error) {
                   await i.update({
@@ -6188,6 +6223,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await interaction.reply({ embeds: [embed] });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} se unió al evento: ${event.name}`);
+
+          // Actualizar mensaje de anuncio del evento
+          if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+            try {
+              const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+              const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+              const updatedEmbed = new EmbedBuilder()
+                .setColor(COLORS.SUCCESS)
+                .setTitle(`${event.emoji} Evento Creado`)
+                .setDescription(
+                  `**${event.name}**\n` +
+                  `${event.description}\n\n` +
+                  `**ID:** \`${event.id}\`\n` +
+                  `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                  `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
+                  `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                  `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                  `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                )
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              await announcementMessage.edit({ embeds: [updatedEmbed] });
+            } catch (err) {
+              console.error('Error actualizando mensaje de anuncio del evento:', err.message);
+            }
+          }
         } catch (error) {
           console.error('Error uniéndose a evento:', error.message);
           return interaction.reply({
@@ -6280,6 +6343,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   });
 
                   console.log(`${EMOJIS.VOICE} ${i.user.tag} salió del evento: ${event.name}`);
+
+                  // Actualizar mensaje de anuncio del evento
+                  if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+                    try {
+                      const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+                      const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+                      const updatedEmbed = new EmbedBuilder()
+                        .setColor(COLORS.SUCCESS)
+                        .setTitle(`${event.emoji} Evento Creado`)
+                        .setDescription(
+                          `**${event.name}**\n` +
+                          `${event.description}\n\n` +
+                          `**ID:** \`${event.id}\`\n` +
+                          `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                          `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
+                          `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                          `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                          `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                        )
+                        .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                        .setTimestamp();
+
+                      await announcementMessage.edit({ embeds: [updatedEmbed] });
+                    } catch (err) {
+                      console.error('Error actualizando mensaje de anuncio del evento:', err.message);
+                    }
+                  }
+
                   collector.stop('completed');
                 } catch (error) {
                   await i.update({
@@ -6339,6 +6431,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           console.log(`${EMOJIS.VOICE} ${interaction.user.tag} salió del evento: ${event.name}`);
+
+          // Actualizar mensaje de anuncio del evento
+          if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+            try {
+              const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+              const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+              const updatedEmbed = new EmbedBuilder()
+                .setColor(COLORS.SUCCESS)
+                .setTitle(`${event.emoji} Evento Creado`)
+                .setDescription(
+                  `**${event.name}**\n` +
+                  `${event.description}\n\n` +
+                  `**ID:** \`${event.id}\`\n` +
+                  `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                  `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
+                  `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                  `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                  `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                )
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              await announcementMessage.edit({ embeds: [updatedEmbed] });
+            } catch (err) {
+              console.error('Error actualizando mensaje de anuncio del evento:', err.message);
+            }
+          }
         } catch (error) {
           console.error('Error saliendo de evento:', error.message);
           return interaction.reply({
@@ -6633,6 +6753,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await interaction.reply({ embeds: [embed] });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} inició evento: ${event.name}`);
+
+          // Actualizar mensaje de anuncio del evento (cambiar estado a Activo)
+          if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+            try {
+              const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+              const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+              const updatedEmbed = new EmbedBuilder()
+                .setColor(COLORS.SUCCESS)
+                .setTitle(`${event.emoji} Evento Creado`)
+                .setDescription(
+                  `**${event.name}**\n` +
+                  `${event.description}\n\n` +
+                  `**ID:** \`${event.id}\`\n` +
+                  `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                  `**Estado:** ▶️ Activo\n` +
+                  `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                  `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                  `¡El evento ha comenzado! Usa \`/evento ver evento:${event.name}\` para más detalles.`
+                )
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              await announcementMessage.edit({ embeds: [updatedEmbed] });
+            } catch (err) {
+              console.error('Error actualizando mensaje de anuncio del evento al iniciar:', err.message);
+            }
+          }
 
           // Si es un torneo, anunciar los combates de la primera ronda
           if (event.type === 'duel_tournament' && event.metadata.bracket) {
