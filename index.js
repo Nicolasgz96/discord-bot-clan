@@ -6533,7 +6533,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 const p1Data = dataManager.getUser(match.player1, guildId);
                 const p2Data = dataManager.getUser(match.player2, guildId);
 
-                const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, client);
+                const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, client, guildId);
                 const matchMessage = await interaction.channel.send({ embeds: [matchEmbed] });
 
                 // Guardar ID del primer mensaje como announcementMessageId

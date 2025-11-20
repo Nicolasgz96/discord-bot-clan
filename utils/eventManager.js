@@ -637,9 +637,10 @@ class EventManager {
    * @param {Object} p1Data - Datos del jugador 1 (userData)
    * @param {Object} p2Data - Datos del jugador 2 (userData)
    * @param {Client} client - Cliente de Discord
+   * @param {string} guildId - ID del servidor
    * @returns {Promise<EmbedBuilder>} Embed del combate
    */
-  async generateMatchVSEmbed(match, p1Data, p2Data, client) {
+  async generateMatchVSEmbed(match, p1Data, p2Data, client, guildId = null) {
     const { EmbedBuilder } = require('discord.js');
     const EMOJIS = require('../src/config/emojis');
     const COLORS = require('../src/config/colors');
@@ -648,14 +649,22 @@ class EventManager {
     const player1 = await client.users.fetch(match.player1).catch(() => null);
     const player2 = await client.users.fetch(match.player2).catch(() => null);
 
-    // Obtener guild para displayNames
-    const guild = client.guilds.cache.first();
+    // Obtener guild correcto usando el guildId proporcionado
+    let guild = null;
+    if (guildId) {
+      guild = client.guilds.cache.get(guildId);
+    } else {
+      guild = client.guilds.cache.first();
+    }
+
     const member1 = guild ? await guild.members.fetch(match.player1).catch(() => null) : null;
     const member2 = guild ? await guild.members.fetch(match.player2).catch(() => null) : null;
 
     // MEJORA 4: Usar displayName (nick del servidor) si está disponible
     const p1Name = member1 ? member1.displayName : (player1 ? player1.username : match.player1);
     const p2Name = member2 ? member2.displayName : (player2 ? player2.username : match.player2);
+
+    console.log(`🏷️ Combate - P1: "${p1Name}" (apodo: ${!!member1}), P2: "${p2Name}" (apodo: ${!!member2})`);
 
     // Obtener avatares con tamaño consistente más grande
     const p1Avatar = player1 ? player1.displayAvatarURL({ size: 256 }) : null;
