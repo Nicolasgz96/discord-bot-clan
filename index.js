@@ -9701,25 +9701,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
           }
 
-          const opponent = match.player1 === userId ? match.player2 : match.player1;
-          const opponentMention = opponent ? `<@${opponent}>` : 'BYE';
+          // Obtener datos de ambos jugadores para el embed VS
+          const player1Data = dataManager.getUser(match.player1, guildId);
+          const player2Data = match.player2 ? dataManager.getUser(match.player2, guildId) : null;
 
-          const embed = new EmbedBuilder()
-            .setColor(COLORS.WARNING)
-            .setTitle('⚔️ Tu Combate de Torneo')
-            .setDescription(
-              `Tienes un combate pendiente en el torneo **${activeTournament.name}**.\n\n` +
-              `**Oponente:** ${opponentMention}\n` +
-              `**Ronda:** ${match.round}\n\n` +
-              `Para registrar el resultado:\n` +
-              `1. Completa tu combate con tu oponente\n` +
-              `2. Usa \`/torneo registrar\` para registrar el resultado\n` +
-              `3. Ambos jugadores deben confirmar el ganador`
-            )
-            .setFooter({ text: 'El ganador avanza a la siguiente ronda' })
-            .setTimestamp();
+          // Generar embed visual de VS
+          const vsEmbed = eventManager.generateMatchVSEmbed(match, player1Data, player2Data, interaction.client);
 
-          return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+          // Agregar información sobre cómo registrar resultado
+          vsEmbed.addFields({
+            name: '📝 Cómo Registrar el Resultado',
+            value:
+              `**1.** Completa tu combate contra tu oponente\n` +
+              `**2.** Usa \`/torneo registrar\` para registrar el resultado\n` +
+              `**3.** Ambos jugadores deben confirmar el ganador\n\n` +
+              `🏆 El ganador avanza a la siguiente ronda`,
+            inline: false
+          });
+
+          vsEmbed.setFooter({ text: `Torneo: ${activeTournament.name} | Ronda ${match.round}` });
+
+          return interaction.reply({ embeds: [vsEmbed], flags: MessageFlags.Ephemeral });
         } catch (error) {
           console.error('Error al obtener combate del usuario:', error);
           return interaction.reply({
@@ -9825,7 +9827,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
               if (vote1 === vote2) {
                 // Votos coinciden, registrar ganador
                 try {
-                  eventManager.recordTournamentWinner(activeTournament.eventId, selectedWinner, loser);
+                  const tournamentResult = eventManager.recordTournamentWinner(activeTournament.eventId, selectedWinner, loser);
 
                   // Limpiar confirmaciones
                   delete global.tournamentConfirmations[matchKey];
@@ -9849,6 +9851,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   await interaction.channel.send({
                     content: `🏆 **Resultado del Torneo**\n<@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
                   });
+
+                  // Si se avanzó a una nueva ronda, anunciar los nuevos combates
+                  const updatedTournament = eventManager.getEvent(activeTournament.eventId);
+                  if (updatedTournament.metadata.roundAdvanced) {
+                    // Resetear flag
+                    updatedTournament.metadata.roundAdvanced = false;
+                    eventManager.saveEvents();
+
+                    // Obtener los combates de la nueva ronda
+                    const bracket = updatedTournament.metadata.bracket;
+                    const currentRound = Math.max(...bracket.map(m => m.round));
+                    const newRoundMatches = bracket.filter(m => m.round === currentRound && !m.winner);
+
+                    if (newRoundMatches.length > 0) {
+                      // Anunciar nueva ronda
+                      await interaction.channel.send({
+                        content: `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${currentRound}** del torneo **${updatedTournament.name}**\n\n**Combates de esta ronda:**`
+                      });
+
+                      // Anunciar cada combate con embed visual
+                      for (const match of newRoundMatches) {
+                        if (!match.player2) continue; // Skip BYEs
+
+                        const p1Data = dataManager.getUser(match.player1, guildId);
+                        const p2Data = dataManager.getUser(match.player2, guildId);
+                        const matchEmbed = eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client);
+
+                        await interaction.channel.send({ embeds: [matchEmbed] });
+
+                        // Pequeño delay para evitar rate limit
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                      }
+                    }
+                  }
 
                   collector.stop();
                 } catch (error) {

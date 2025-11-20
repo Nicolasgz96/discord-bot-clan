@@ -484,6 +484,8 @@ class EventManager {
     if (allMatchesComplete) {
       // Advance to next round
       this.advanceToNextRound(eventId);
+      // Mark that round advanced so we can announce new matches
+      event.metadata.roundAdvanced = true;
     }
 
     this.saveEvents();
@@ -539,27 +541,38 @@ class EventManager {
 
     // Create next round matches
     const nextRound = currentRound + 1;
+    const newMatches = [];
+
     for (let i = 0; i < winners.length; i += 2) {
       if (i + 1 < winners.length) {
-        bracket.push({
+        const match = {
           player1: winners[i],
           player2: winners[i + 1],
           winner: null,
           round: nextRound
-        });
+        };
+        bracket.push(match);
+        newMatches.push(match);
       } else {
         // Bye - player advances automatically
-        bracket.push({
+        const match = {
           player1: winners[i],
           player2: null,
           winner: winners[i],
           round: nextRound
-        });
+        };
+        bracket.push(match);
+        newMatches.push(match);
       }
     }
 
     this.saveEvents();
-    return { complete: false, nextRound, matchesCreated: Math.ceil(winners.length / 2) };
+    return {
+      complete: false,
+      nextRound,
+      matchesCreated: Math.ceil(winners.length / 2),
+      newMatches // Devolver los matches creados para anunciarlos
+    };
   }
 
   /**
@@ -608,6 +621,69 @@ class EventManager {
     );
 
     return match;
+  }
+
+  /**
+   * Generate tournament match VS embed showing both players' profiles
+   */
+  generateMatchVSEmbed(match, player1Data, player2Data, client) {
+    const { EmbedBuilder } = require('discord.js');
+    const COLORS = require('../src/config/colors');
+    const EMOJIS = require('../src/config/emojis');
+
+    // Get user objects from Discord client
+    const player1 = client.users.cache.get(match.player1);
+    const player2 = match.player2 ? client.users.cache.get(match.player2) : null;
+
+    // Extract bio and rank info
+    const p1Bio = player1Data?.customization?.bio || 'Un guerrero silencioso...';
+    const p1Rank = player1Data?.rank || 'Ronin';
+    const p1Honor = player1Data?.honor || 0;
+
+    const p2Bio = player2Data?.customization?.bio || 'Un guerrero silencioso...';
+    const p2Rank = player2Data?.rank || 'Ronin';
+    const p2Honor = player2Data?.honor || 0;
+
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.WARNING)
+      .setTitle('⚔️ COMBATE DE TORNEO ⚔️')
+      .setDescription('**Dos guerreros se enfrentan en batalla**')
+      .addFields(
+        {
+          name: `${EMOJIS.KATANA} ${player1?.username || 'Guerrero Desconocido'}`,
+          value:
+            `**Rango:** ${p1Rank}\n` +
+            `**Honor:** ${p1Honor.toLocaleString()}\n` +
+            `**Bio:** *"${p1Bio}"*`,
+          inline: true
+        },
+        {
+          name: '⚡',
+          value: '**VS**',
+          inline: true
+        },
+        {
+          name: `${EMOJIS.KATANA} ${player2?.username || 'BYE'}`,
+          value: player2
+            ? `**Rango:** ${p2Rank}\n` +
+              `**Honor:** ${p2Honor.toLocaleString()}\n` +
+              `**Bio:** *"${p2Bio}"*`
+            : '*Pase automático a la siguiente ronda*',
+          inline: true
+        }
+      )
+      .setTimestamp();
+
+    // Set thumbnails with player avatars
+    if (player1) {
+      embed.setThumbnail(player1.displayAvatarURL({ dynamic: true, size: 256 }));
+    }
+
+    if (player2) {
+      embed.setImage(player2.displayAvatarURL({ dynamic: true, size: 256 }));
+    }
+
+    return embed;
   }
 
   /**
