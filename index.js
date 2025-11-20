@@ -5950,6 +5950,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (join): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
             // Importar eventManager dinámicamente para evitar problemas de closure
             const { getEventManager, EVENT_STATUS } = require('./utils/eventManager');
             const eventManager = getEventManager();
@@ -6126,6 +6132,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (leave): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
             // Importar eventManager dinámicamente para evitar problemas de closure
             const { getEventManager } = require('./utils/eventManager');
             const eventManager = getEventManager();
@@ -6272,6 +6284,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
 
             collector.on('collect', async (i) => {
+              // Si handlers/events.js ya manejó esta interacción, saltar
+              if (i.replied || i.deferred) {
+                console.log(`🔄 Collector (view): Interaction ${i.id} already handled, skipping`);
+                return;
+              }
+
               // Importar eventManager dinámicamente para evitar problemas de closure
               const { getEventManager } = require('./utils/eventManager');
               const eventManager = getEventManager();
@@ -6624,6 +6642,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (finalize): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
             // Importar eventManager dinámicamente para evitar problemas de closure
             const { getEventManager } = require('./utils/eventManager');
             const eventManager = getEventManager();
@@ -6837,6 +6861,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (cancel): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
             // Importar eventManager dinámicamente para evitar problemas de closure
             const { getEventManager } = require('./utils/eventManager');
             const eventManager = getEventManager();
@@ -7064,6 +7094,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (vote): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
             // Importar eventManager dinámicamente para evitar problemas de closure
             const { getEventManager } = require('./utils/eventManager');
             const eventManager = getEventManager();
