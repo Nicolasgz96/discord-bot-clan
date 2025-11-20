@@ -28,6 +28,7 @@ module.exports = {
 
     const isEventInteraction = eventInteractionIds.includes(interaction.customId) ||
                                interaction.customId.startsWith('event_vote_select_user:') ||
+                               interaction.customId.startsWith('building_submit_event:') ||
                                interaction.customId.startsWith('event_');
 
     if (!isEventInteraction) return;
@@ -351,6 +352,59 @@ module.exports = {
           console.error('Error manejando selección del torneo:', error);
           await interaction.followUp({
             content: `${EMOJIS.ERROR} Error al procesar la selección: ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          }).catch(() => {});
+        }
+      }
+
+      // ========== Manejo de envío de construcción (selector de evento) ==========
+      else if (interaction.customId.startsWith('building_submit_event:') && interaction.isStringSelectMenu()) {
+        try {
+          const [, requestUserId, imageUrl] = interaction.customId.split(':');
+
+          // Verificar que sea el usuario correcto
+          if (interaction.user.id !== requestUserId) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} Esta selección no es para ti.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const selectedEventId = interaction.values[0];
+          const event = eventManager.getEvent(selectedEventId);
+
+          if (!event) {
+            return interaction.update({
+              content: `${EMOJIS.ERROR} El evento seleccionado ya no existe.`,
+              embeds: [],
+              components: []
+            });
+          }
+
+          // Mostrar modal para pedir descripción
+          const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+
+          const modal = new ModalBuilder()
+            .setCustomId(`building_submit_description:${event.id}:${imageUrl}`)
+            .setTitle(`Descripción - ${event.name}`);
+
+          const descriptionInput = new TextInputBuilder()
+            .setCustomId('description')
+            .setLabel('Describe tu construcción')
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder('Ej: Castillo medieval con 4 torres y murallas de piedra')
+            .setRequired(false)
+            .setMaxLength(500);
+
+          const row = new require('discord.js').ActionRowBuilder().addComponents(descriptionInput);
+          modal.addComponents(row);
+
+          await interaction.showModal(modal);
+          console.log(`📝 Modal de descripción mostrado a ${interaction.user.tag} para evento ${event.name}`);
+        } catch (error) {
+          console.error('Error mostrando modal de descripción:', error);
+          await interaction.reply({
+            content: `${EMOJIS.ERROR} Error al mostrar el formulario de descripción.`,
             flags: MessageFlags.Ephemeral
           }).catch(() => {});
         }

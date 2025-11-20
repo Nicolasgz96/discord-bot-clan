@@ -134,6 +134,74 @@ client.on(Events.MessageCreate, async (message) => {
   // Ignorar mensajes de bots para prevenir bucles infinitos
   if (message.author.bot) return;
 
+  // ========== SISTEMA INTERACTIVO: ENVÍO DE CONSTRUCCIONES ==========
+  // Detectar si el mensaje contiene imágenes para eventos de construcción
+  if (message.attachments.size > 0 && message.guild) {
+    const imageAttachment = message.attachments.find(att =>
+      att.contentType && (
+        att.contentType.startsWith('image/') ||
+        att.url.match(/\.(png|jpg|jpeg|gif|webp)$/i)
+      )
+    );
+
+    if (imageAttachment) {
+      try {
+        const { getEventManager, EVENT_STATUS } = require('./utils/eventManager');
+        const eventManager = getEventManager();
+        const userId = message.author.id;
+        const guildId = message.guild.id;
+
+        // Buscar eventos de construcción activos donde el usuario esté inscrito
+        const activeEvents = eventManager.getActiveEvents(guildId);
+        const buildingEvents = activeEvents.filter(e =>
+          e.type === 'building_contest' &&
+          e.participants.includes(userId)
+        );
+
+        if (buildingEvents.length > 0) {
+          const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
+
+          // Crear opciones del dropdown
+          const options = buildingEvents.map(event =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(event.name.substring(0, 100))
+              .setDescription(`🏗️ ${event.participants.length} participantes`.substring(0, 100))
+              .setValue(event.id)
+              .setEmoji('🏗️')
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId(`building_submit_event:${userId}:${imageAttachment.url}`)
+            .setPlaceholder('📸 Selecciona el evento para esta construcción')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder().addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('📸 ¡Imagen Detectada!')
+            .setDescription(
+              `He detectado que subiste una imagen.\n\n` +
+              `**¿Para qué evento de construcción es?**\n` +
+              `Selecciona el evento del menú de abajo.`
+            )
+            .setThumbnail(imageAttachment.url)
+            .setFooter({ text: 'El menú expira en 5 minutos' })
+            .setTimestamp();
+
+          await message.reply({
+            embeds: [embed],
+            components: [row]
+          });
+
+          console.log(`📸 ${message.author.tag} subió imagen, mostrando selector de eventos`);
+        }
+      } catch (error) {
+        console.error('Error procesando imagen para evento:', error);
+      }
+    }
+  }
+
   // ========== SISTEMA DE HONOR PASIVO: MENSAJES ==========
   // Ganar honor por enviar mensajes (con cooldown de 1 minuto)
   if (message.guild && message.author && !message.content.startsWith('!') && !message.content.startsWith('/')) {
@@ -7508,44 +7576,75 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   });
                 }
 
+                // Create embeds showing all submissions with images
+                const submissionEmbeds = await Promise.all(submissions.map(async ([submissionUserId, submission], index) => {
+                  try {
+                    const user = await interaction.client.users.fetch(submissionUserId);
+                    const embed = new EmbedBuilder()
+                      .setColor(COLORS.PRIMARY)
+                      .setAuthor({ name: `${index + 1}. ${user.username}`, iconURL: user.displayAvatarURL() })
+                      .setDescription(
+                        `**Descripción:**\n${submission.description || 'Sin descripción'}\n\n` +
+                        `**Votos actuales:** ${submission.votes || 0} 🗳️`
+                      )
+                      .setImage(submission.imageUrl)
+                      .setFooter({ text: `Enviado ${new Date(submission.submittedAt).toLocaleDateString()}` });
+                    return embed;
+                  } catch (error) {
+                    const embed = new EmbedBuilder()
+                      .setColor(COLORS.PRIMARY)
+                      .setAuthor({ name: `${index + 1}. Usuario ${submissionUserId}` })
+                      .setDescription(
+                        `**Descripción:**\n${submission.description || 'Sin descripción'}\n\n` +
+                        `**Votos actuales:** ${submission.votes || 0} 🗳️`
+                      )
+                      .setImage(submission.imageUrl)
+                      .setFooter({ text: `Enviado ${new Date(submission.submittedAt).toLocaleDateString()}` });
+                    return embed;
+                  }
+                }));
+
                 // Create dropdown for user submissions
-                const userOptions = await Promise.all(submissions.map(async ([submissionUserId, submission]) => {
+                const userOptions = await Promise.all(submissions.map(async ([submissionUserId, submission], index) => {
                   try {
                     const user = await interaction.client.users.fetch(submissionUserId);
                     return new StringSelectMenuOptionBuilder()
-                      .setLabel(user.username.substring(0, 100))
-                      .setDescription((submission.description || 'Sin descripción').substring(0, 100))
+                      .setLabel(`${index + 1}. ${user.username}`.substring(0, 100))
+                      .setDescription(`${submission.votes || 0} votos`.substring(0, 100))
                       .setValue(submissionUserId)
-                      .setEmoji('🏗️');
+                      .setEmoji('🗳️');
                   } catch (error) {
                     return new StringSelectMenuOptionBuilder()
-                      .setLabel(`Usuario ${submissionUserId}`)
-                      .setDescription((submission.description || 'Sin descripción').substring(0, 100))
+                      .setLabel(`${index + 1}. Usuario ${submissionUserId}`.substring(0, 100))
+                      .setDescription(`${submission.votes || 0} votos`.substring(0, 100))
                       .setValue(submissionUserId)
-                      .setEmoji('🏗️');
+                      .setEmoji('🗳️');
                   }
                 }));
 
                 const userSelectMenu = new StringSelectMenuBuilder()
                   .setCustomId(`event_vote_select_user:${selectedEventId}`)
-                  .setPlaceholder('🏗️ Selecciona una construcción para votar')
+                  .setPlaceholder('🗳️ Selecciona el número de la construcción')
                   .addOptions(userOptions);
 
                 const userRow = new ActionRowBuilder()
                   .addComponents(userSelectMenu);
 
-                const userEmbed = new EmbedBuilder()
-                  .setColor(COLORS.PRIMARY)
-                  .setTitle(`🗳️ Votar en: ${event.name}`)
+                const headerEmbed = new EmbedBuilder()
+                  .setColor(COLORS.SUCCESS)
+                  .setTitle(`🗳️ ${event.name}`)
                   .setDescription(
-                    `Selecciona la construcción por la que deseas votar.\n\n` +
-                    `**Construcciones disponibles:** ${submissions.length}\n\n` +
+                    `**📸 Construcciones Enviadas**\n\n` +
+                    `Revisa las ${submissions.length} construcciones abajo y selecciona tu favorita del menú.\n\n` +
                     `⚠️ Solo puedes votar una vez por concurso`
                   )
                   .setFooter({ text: 'El menú expira en 5 minutos' })
                   .setTimestamp();
 
-                await i.update({ embeds: [userEmbed], components: [userRow] });
+                // Combine header embed with all submission embeds
+                const allEmbeds = [headerEmbed, ...submissionEmbeds];
+
+                await i.update({ embeds: allEmbeds, components: [userRow] });
               } else if (i.customId.startsWith('event_vote_select_user:')) {
                 const selectedEventId = i.customId.split(':')[1];
                 const selectedUserId = i.values[0];

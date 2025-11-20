@@ -10,10 +10,63 @@ module.exports = {
   name: Events.InteractionCreate,
   async execute(interaction, { client, dataManager }) {
     if (!interaction.isModalSubmit()) return;
-    if (interaction.customId !== 'save_playlist_modal') return;
 
-    try {
-      const playlistName = interaction.fields.getTextInputValue('playlist_name');
+    // ========== MODAL: Envío de construcción ==========
+    if (interaction.customId.startsWith('building_submit_description:')) {
+      try {
+        const [, eventId, ...imageUrlParts] = interaction.customId.split(':');
+        const imageUrl = imageUrlParts.join(':'); // Reconstruir URL que puede tener ":"
+        const description = interaction.fields.getTextInputValue('description') || 'Sin descripción';
+
+        const { getEventManager } = require('../utils/eventManager');
+        const eventManager = getEventManager();
+        const EMOJIS = require('../src/config/emojis');
+        const COLORS = require('../src/config/colors');
+        const { EmbedBuilder } = require('discord.js');
+
+        const event = eventManager.getEvent(eventId);
+        if (!event) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} El evento ya no existe.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const userId = interaction.user.id;
+        const guildId = interaction.guild.id;
+
+        // Enviar construcción
+        eventManager.submitBuildingEntry(eventId, userId, imageUrl, description);
+
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.SUCCESS)
+          .setTitle(`${EMOJIS.SUCCESS} ¡Construcción Enviada!`)
+          .setDescription(
+            `Tu construcción ha sido registrada para **${event.name}**.\n\n` +
+            `**Descripción:** ${description}\n\n` +
+            `¡Buena suerte! 🏗️`
+          )
+          .setImage(imageUrl)
+          .setFooter({ text: 'Los participantes podrán votar por tu construcción' })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+        console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} envió construcción al evento: ${event.name}`);
+      } catch (error) {
+        console.error('Error enviando construcción:', error);
+        const EMOJIS = require('../src/config/emojis');
+        await interaction.reply({
+          content: `${EMOJIS.ERROR} ${error.message}`,
+          flags: MessageFlags.Ephemeral
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    // ========== MODAL: Guardar playlist ==========
+    if (interaction.customId === 'save_playlist_modal') {
+      try {
+        const playlistName = interaction.fields.getTextInputValue('playlist_name');
       const musicManager = require('../utils/musicManager');
       const queue = musicManager.getQueue(interaction.guild.id);
 
@@ -97,12 +150,14 @@ module.exports = {
 
       console.log(`💾 ${interaction.user.tag} guardó playlist "${playlistName}" con ${allSongs.length} canciones`);
 
-    } catch (error) {
-      console.error('Error guardando playlist:', error);
-      await interaction.reply({
-        content: '❌ Error al guardar la playlist. Intenta más tarde.',
-        flags: MessageFlags.Ephemeral
-      }).catch(() => {});
+      } catch (error) {
+        console.error('Error guardando playlist:', error);
+        await interaction.reply({
+          content: '❌ Error al guardar la playlist. Intenta más tarde.',
+          flags: MessageFlags.Ephemeral
+        }).catch(() => {});
+      }
+      return;
     }
   }
 };
