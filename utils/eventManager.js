@@ -372,19 +372,85 @@ class EventManager {
   }
 
   /**
-   * Update ranks based on scores
+   * Update ranks based on scores (o bracket para torneos)
    */
   updateRanks(eventId) {
     const event = this.getEvent(eventId);
     if (!event) return;
 
-    // Sort participants by score (descending)
+    // Para torneos, calcular ranking basado en la estructura del bracket
+    if (event.type === EVENT_TYPES.DUEL_TOURNAMENT && event.metadata.bracket) {
+      this.updateTournamentRanks(eventId);
+      return;
+    }
+
+    // Para otros eventos, ranking por score
     const sorted = Object.entries(event.results).sort((a, b) => b[1].score - a[1].score);
 
     // Assign ranks
     sorted.forEach(([userId, data], index) => {
       event.results[userId].rank = index + 1;
     });
+  }
+
+  /**
+   * Calcula rankings para torneos basado en la ronda más alta alcanzada
+   */
+  updateTournamentRanks(eventId) {
+    const event = this.getEvent(eventId);
+    if (!event) return;
+
+    const bracket = event.metadata.bracket;
+    if (!bracket || bracket.length === 0) return;
+
+    const maxRound = Math.max(...bracket.map(m => m.round));
+
+    // Encontrar al campeón (ganador del último combate)
+    const finalMatch = bracket.find(m => m.round === maxRound && m.winner && m.player2);
+
+    if (finalMatch) {
+      const champion = finalMatch.winner;
+      const runnerUp = finalMatch.player1 === champion ? finalMatch.player2 : finalMatch.player1;
+
+      // Campeón = Rank 1
+      if (!event.results[champion]) event.results[champion] = { score: 0, rank: null };
+      event.results[champion].rank = 1;
+      event.results[champion].score = maxRound; // Score = ronda alcanzada
+
+      // Subcampeón = Rank 2
+      if (!event.results[runnerUp]) event.results[runnerUp] = { score: 0, rank: null };
+      event.results[runnerUp].rank = 2;
+      event.results[runnerUp].score = maxRound - 1;
+
+      // Resto de participantes ordenados por ronda alcanzada
+      const otherParticipants = event.participants.filter(p => p !== champion && p !== runnerUp);
+
+      // Calcular ronda alcanzada por cada participante
+      const participantRounds = otherParticipants.map(userId => {
+        // Encontrar la ronda más alta donde perdió
+        const lostIn = bracket.find(m =>
+          m.winner &&
+          m.winner !== userId &&
+          (m.player1 === userId || m.player2 === userId)
+        );
+
+        const roundReached = lostIn ? lostIn.round - 1 : 0;
+
+        return { userId, roundReached };
+      });
+
+      // Ordenar por ronda alcanzada (descendente)
+      participantRounds.sort((a, b) => b.roundReached - a.roundReached);
+
+      // Asignar ranks (empezando desde 3)
+      participantRounds.forEach((p, index) => {
+        if (!event.results[p.userId]) event.results[p.userId] = { score: 0, rank: null };
+        event.results[p.userId].rank = index + 3;
+        event.results[p.userId].score = p.roundReached;
+      });
+
+      console.log(`🏆 Rankings de torneo actualizados - Campeón: ${champion}, Subcampeón: ${runnerUp}`);
+    }
   }
 
   /**
