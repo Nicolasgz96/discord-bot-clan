@@ -1521,15 +1521,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Anunciar resultado en el canal
       await interaction.channel.send({
-        content: `🏆 **Resultado del Torneo**\n<@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
+        content: `🏆 **Resultado:** <@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
       });
 
-      // Mostrar bracket actualizado
-      const bracketEmbed = eventManager.generateBracketEmbed(tournament.id, interaction.client);
-      await interaction.channel.send({
-        content: '📊 **Bracket Actualizado:**',
-        embeds: [bracketEmbed]
-      });
+      // Actualizar el mensaje del bracket automáticamente (ANTI-SPAM)
+      await eventManager.updateBracketMessage(tournament.id, interaction.channel, interaction.client, dataManager, guildId);
 
       // Verificar si se avanzó a nueva ronda
       const updatedTournament = eventManager.getEvent(tournament.id);
@@ -1554,6 +1550,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await interaction.channel.send({ embeds: [matchEmbed] });
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
+
+          // Actualizar el bracket después de anunciar la nueva ronda (ANTI-SPAM)
+          await eventManager.updateBracketMessage(tournament.id, interaction.channel, interaction.client, dataManager, guildId);
         }
       }
 
