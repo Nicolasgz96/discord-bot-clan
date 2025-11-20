@@ -653,18 +653,31 @@ class EventManager {
     let guild = null;
     if (guildId) {
       guild = client.guilds.cache.get(guildId);
+      console.log(`🔍 Buscando servidor con ID: ${guildId} - ${guild ? `✅ Encontrado: ${guild.name}` : '❌ NO ENCONTRADO'}`);
     } else {
       guild = client.guilds.cache.first();
+      console.log(`⚠️ No se proporcionó guildId, usando primer servidor: ${guild ? guild.name : 'ninguno'}`);
     }
 
-    const member1 = guild ? await guild.members.fetch(match.player1).catch(() => null) : null;
-    const member2 = guild ? await guild.members.fetch(match.player2).catch(() => null) : null;
+    if (!guild) {
+      const availableGuilds = Array.from(client.guilds.cache.entries()).map(([id, g]) => `${id} (${g.name})`);
+      console.log(`❌ ERROR: No se pudo obtener el servidor. Servidores en cache: ${availableGuilds.join(', ')}`);
+    }
+
+    const member1 = guild ? await guild.members.fetch(match.player1).catch((e) => {
+      console.log(`⚠️ No se pudo obtener member1 (${match.player1}): ${e.message}`);
+      return null;
+    }) : null;
+    const member2 = guild ? await guild.members.fetch(match.player2).catch((e) => {
+      console.log(`⚠️ No se pudo obtener member2 (${match.player2}): ${e.message}`);
+      return null;
+    }) : null;
 
     // MEJORA 4: Usar displayName (nick del servidor) si está disponible
     const p1Name = member1 ? member1.displayName : (player1 ? player1.username : match.player1);
     const p2Name = member2 ? member2.displayName : (player2 ? player2.username : match.player2);
 
-    console.log(`🏷️ Combate - P1: "${p1Name}" (apodo: ${!!member1}), P2: "${p2Name}" (apodo: ${!!member2})`);
+    console.log(`🏷️ Nombres finales - P1: "${p1Name}" (displayName: ${member1?.displayName || 'N/A'}), P2: "${p2Name}" (displayName: ${member2?.displayName || 'N/A'})`);
 
     // Obtener avatares con tamaño consistente más grande
     const p1Avatar = player1 ? player1.displayAvatarURL({ size: 256 }) : null;
