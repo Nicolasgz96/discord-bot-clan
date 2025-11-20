@@ -264,6 +264,9 @@ module.exports = {
           // Registrar ganador usando la nueva función
           eventManager.recordTournamentWinner(tournament.id, selectedWinner, loser);
 
+          // ====== ANTI-SPAM: Actualizar bracket en lugar de crear mensajes nuevos ======
+          // Actualizar el mensaje principal del bracket con el nuevo estado
+          await eventManager.updateBracketMessage(tournament.id, interaction.channel, client, dataManager, guildId);
           // Obtener displayNames para los mensajes
           const winnerName = await eventManager.getDisplayName(client, guildId, selectedWinner);
           const loserName = await eventManager.getDisplayName(client, guildId, loser);

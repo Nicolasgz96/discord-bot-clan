@@ -6873,6 +6873,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
             }
           }
 
+          // Si es un torneo, crear mensaje principal del bracket (ANTI-SPAM)
+          if (event.type === 'duel_tournament' && event.metadata.bracket) {
+            try {
+              // Crear el mensaje inicial del bracket
+              const bracketMessage = await interaction.channel.send({
+                content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con ${event.participants.length} participantes\n\n_El bracket se actualizará automáticamente..._`
+              });
+
+              // Guardar el ID del mensaje del bracket
+              event.metadata.bracketMessageId = bracketMessage.id;
+              eventManager.saveEvents();
+              console.log(`📊 Mensaje inicial del bracket creado: ${bracketMessage.id}`);
+
+              // Actualizar inmediatamente con el bracket completo
+              await eventManager.updateBracketMessage(event.id, interaction.channel, interaction.client, dataManager, guildId);
+
+              console.log(`✅ Bracket inicial generado para ${event.name}`);
           // Si es un torneo, anunciar los combates de la primera ronda
           if (event.type === 'duel_tournament' && event.metadata.bracket) {
             const bracket = event.metadata.bracket;
@@ -6937,6 +6954,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                 console.log(`✅ Mensaje de control creado: ${controlMessage.id} para torneo ${event.id}`);
               }
+            } catch (bracketError) {
+              console.error(`❌ Error creando bracket inicial del torneo:`, bracketError);
             }
           }
         } catch (error) {
