@@ -1525,9 +1525,51 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Actualizar el mensaje del bracket automáticamente (ANTI-SPAM)
       await eventManager.updateBracketMessage(tournament.id, interaction.channel, interaction.client, dataManager, guildId);
 
-      // Verificar si se avanzó a nueva ronda
+      // Actualizar mensaje del combate actual con el siguiente combate pendiente
       const updatedTournament = eventManager.getEvent(tournament.id);
       const updatedBracket = updatedTournament.metadata.bracket;
+      const nextPendingMatch = updatedBracket.find(m => !m.winner && m.player2);
+
+      if (nextPendingMatch && updatedTournament.metadata.currentMatchMessageId) {
+        try {
+          const currentMatchMessage = await interaction.channel.messages.fetch(updatedTournament.metadata.currentMatchMessageId);
+          const p1Data = dataManager.getUser(nextPendingMatch.player1, guildId);
+          const p2Data = dataManager.getUser(nextPendingMatch.player2, guildId);
+          const matchEmbed = await eventManager.generateMatchVSEmbed(nextPendingMatch, p1Data, p2Data, interaction.client, guildId);
+
+          await currentMatchMessage.edit({
+            content: `⚔️ **TORNEO EN CURSO** ⚔️\n**${updatedTournament.name}**\n\n**Combate Actual:**`,
+            embeds: [matchEmbed]
+          });
+        } catch (err) {
+          console.error(`❌ Error actualizando mensaje de combate actual:`, err.message);
+        }
+      } else if (!nextPendingMatch && updatedTournament.metadata.currentMatchMessageId) {
+        // No hay más combates - mostrar finalización
+        try {
+          const currentMatchMessage = await interaction.channel.messages.fetch(updatedTournament.metadata.currentMatchMessageId);
+          const finalMatch = updatedBracket.find(m => m.round === Math.max(...updatedBracket.map(m2 => m2.round)) && m.winner);
+
+          if (finalMatch) {
+            const championName = await eventManager.getDisplayName(interaction.client, guildId, finalMatch.winner);
+            const embed = new EmbedBuilder()
+              .setColor(COLORS.SUCCESS)
+              .setTitle('👑 ¡TORNEO FINALIZADO!')
+              .setDescription(`**Campeón:** ${championName}\n\n¡Felicidades al ganador!`)
+              .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+              .setTimestamp();
+
+            await currentMatchMessage.edit({
+              content: `⚔️ **TORNEO COMPLETADO** ⚔️\n**${updatedTournament.name}**`,
+              embeds: [embed]
+            });
+          }
+        } catch (err) {
+          console.error(`❌ Error actualizando mensaje final:`, err.message);
+        }
+      }
+
+      // Verificar si se avanzó a nueva ronda
       const updatedCurrentRound = Math.max(...updatedBracket.map(m => m.round));
 
       // Si la ronda cambió, solo anunciar (el bracket ya muestra los combates)
@@ -1642,22 +1684,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const bracket = event.metadata.bracket;
         const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
 
+        // Crear mensaje del combate actual (1 solo mensaje que se actualiza)
         if (firstRoundMatches.length > 0) {
-          // Anunciar combates de primera ronda
-          await interaction.channel.send({
-            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n**Combates de la primera ronda:**`
+          const firstMatch = firstRoundMatches[0];
+          const p1Data = dataManager.getUser(firstMatch.player1, guildId);
+          const p2Data = dataManager.getUser(firstMatch.player2, guildId);
+
+          const matchEmbed = await eventManager.generateMatchVSEmbed(firstMatch, p1Data, p2Data, interaction.client, guildId);
+
+          const currentMatchMessage = await interaction.channel.send({
+            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n**Combate Actual:**`,
+            embeds: [matchEmbed]
           });
 
-          // Anunciar cada combate de la primera ronda con embed
-          for (const match of firstRoundMatches) {
-            const p1Data = dataManager.getUser(match.player1, guildId);
-            const p2Data = dataManager.getUser(match.player2, guildId);
-
-            const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client, guildId);
-            await interaction.channel.send({ embeds: [matchEmbed] });
-
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          }
+          // Guardar ID del mensaje de combate actual para actualizarlo después
+          event.metadata.currentMatchMessageId = currentMatchMessage.id;
+          eventManager.saveEvents();
         }
 
         // Crear mensaje del bracket (que se actualiza automáticamente)
@@ -6971,51 +7013,46 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await interaction.reply({ embeds: [embed] });
 
-          // Si es un torneo de duelos, anunciar combates y enviar panel de control
+          // Si es un torneo de duelos, crear mensaje de combate actual y enviar panel de control
           if (event.type === 'duel_tournament' && event.metadata.bracket) {
             const bracket = event.metadata.bracket;
             const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
 
             if (firstRoundMatches.length > 0) {
-              await interaction.channel.send({
-                content: `\n🎊 **¡TORNEO INICIADO!** 🎊\n**${event.name}**\n\n**Combates de la primera ronda:**`
+              // Crear mensaje del combate actual (1 solo mensaje que se actualiza)
+              const firstMatch = firstRoundMatches[0];
+              const p1Data = dataManager.getUser(firstMatch.player1, guildId);
+              const p2Data = dataManager.getUser(firstMatch.player2, guildId);
+
+              const matchEmbed = await eventManager.generateMatchVSEmbed(firstMatch, p1Data, p2Data, client, guildId);
+
+              const currentMatchMessage = await interaction.channel.send({
+                content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n**Combate Actual:**`,
+                embeds: [matchEmbed]
               });
 
-              // Anunciar cada combate de la primera ronda
-              for (const match of firstRoundMatches) {
-                const p1Data = dataManager.getUser(match.player1, guildId);
-                const p2Data = dataManager.getUser(match.player2, guildId);
+              // Guardar ID del mensaje de combate actual para actualizarlo después
+              event.metadata.currentMatchMessageId = currentMatchMessage.id;
+              eventManager.saveEvents();
+            }
 
-                const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, client, guildId);
-                const matchMessage = await interaction.channel.send({ embeds: [matchEmbed] });
+            // Enviar mensaje de control (solo visible para el creador)
+            const controlData = await eventManager.generateTournamentControlMessage(event.id, client);
 
-                // Guardar ID del primer mensaje como announcementMessageId
-                if (!event.metadata.announcementMessageId) {
-                  event.metadata.announcementMessageId = matchMessage.id;
-                  eventManager.saveEvents();
-                }
+            if (controlData) {
+              const controlMessage = await interaction.followUp({
+                content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
+                embeds: [controlData.embed],
+                components: controlData.components,
+                ephemeral: true,
+                fetchReply: true
+              });
 
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              }
+              // Guardar ID del mensaje de control
+              event.metadata.controlMessageId = controlMessage.id;
+              eventManager.saveEvents();
 
-              // Enviar mensaje de control (solo visible para el creador)
-              const controlData = await eventManager.generateTournamentControlMessage(event.id, client);
-
-              if (controlData) {
-                const controlMessage = await interaction.followUp({
-                  content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
-                  embeds: [controlData.embed],
-                  components: controlData.components,
-                  ephemeral: true,
-                  fetchReply: true
-                });
-
-                // Guardar ID del mensaje de control
-                event.metadata.controlMessageId = controlMessage.id;
-                eventManager.saveEvents();
-
-                console.log(`✅ Mensaje de control creado: ${controlMessage.id} para torneo ${event.id}`);
-              }
+              console.log(`✅ Mensaje de control creado: ${controlMessage.id} para torneo ${event.id}`);
             }
           }
 
