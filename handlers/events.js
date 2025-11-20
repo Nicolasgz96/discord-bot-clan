@@ -329,12 +329,21 @@ module.exports = {
           if (newControlData) {
             // Enviar nuevo panel de control como followUp efímero
             // (no podemos editar el mensaje original porque es ephemeral de otra interacción)
-            await interaction.followUp({
+            const newControlMessage = await interaction.followUp({
               content: `🏆 **Panel de Control del Torneo**\n\nSelecciona el ganador del siguiente combate:`,
               embeds: [newControlData.embed],
               components: newControlData.components,
-              ephemeral: true
+              ephemeral: true,
+              fetchReply: true
             });
+
+            // Actualizar el ID del mensaje de control para el próximo clic
+            const updatedTournament = eventManager.getEvent(tournament.id);
+            if (updatedTournament) {
+              updatedTournament.metadata.controlMessageId = newControlMessage.id;
+              eventManager.saveEvents();
+              console.log(`🔄 Panel de control actualizado: ${newControlMessage.id}`);
+            }
           } else {
             // No hay más combates, torneo terminado
             await interaction.followUp({
