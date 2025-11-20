@@ -307,12 +307,9 @@ class EventManager {
 
     event.status = EVENT_STATUS.COMPLETED;
     event.endTime = Date.now();
-
-    // Eliminar el evento automáticamente después de completarlo
-    delete this.events[eventId];
     this.saveEvents();
 
-    console.log(`🗑️ Evento completado y eliminado: ${event.name} (${eventId})`);
+    console.log(`✅ Evento marcado como completado: ${event.name} (${eventId})`);
     return event;
   }
 
@@ -592,6 +589,12 @@ class EventManager {
         });
       }
     }
+
+    // Eliminar el evento después de otorgar premios
+    const eventName = event.name;
+    delete this.events[eventId];
+    this.saveEvents();
+    console.log(`🗑️ Evento eliminado después de otorgar premios: ${eventName} (${eventId})`);
 
     return winners;
   }
