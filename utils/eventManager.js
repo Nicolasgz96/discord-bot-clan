@@ -653,13 +653,17 @@ class EventManager {
     const member1 = guild ? await guild.members.fetch(match.player1).catch(() => null) : null;
     const member2 = guild ? await guild.members.fetch(match.player2).catch(() => null) : null;
 
-    // Usar displayName (nick del servidor) si está disponible
+    // MEJORA 4: Usar displayName (nick del servidor) si está disponible
     const p1Name = member1 ? member1.displayName : (player1 ? player1.username : match.player1);
     const p2Name = member2 ? member2.displayName : (player2 ? player2.username : match.player2);
 
-    // Obtener avatares
-    const p1Avatar = player1 ? player1.displayAvatarURL({ size: 128 }) : null;
-    const p2Avatar = player2 ? player2.displayAvatarURL({ size: 128 }) : null;
+    // Obtener avatares con tamaño consistente más grande
+    const p1Avatar = player1 ? player1.displayAvatarURL({ size: 256 }) : null;
+    const p2Avatar = player2 ? player2.displayAvatarURL({ size: 256 }) : null;
+
+    // Obtener bio desde customization
+    const p1Bio = p1Data?.customization?.bio || 'Un guerrero misterioso...';
+    const p2Bio = p2Data?.customization?.bio || 'Un guerrero misterioso...';
 
     const embed = new EmbedBuilder()
       .setColor(COLORS.COMBAT || '#FF6B35')
@@ -669,41 +673,37 @@ class EventManager {
         {
           name: `${EMOJIS.KATANA || '⚔️'} ${p1Name}`,
           value:
-            `**Rango:** ${p1Data.rank || 'Ronin'}\n` +
-            `**Honor:** ${p1Data.honor || 0}\n` +
-            `**Bio:** *"${p1Data.bio || 'Un guerrero misterioso...'}"*`,
+            `**Rango:** ${p1Data?.rank || 'Ronin'}\n` +
+            `**Honor:** ${p1Data?.honor || 0}\n` +
+            `**Bio:** *"${p1Bio}"*`,
           inline: true
         },
         {
-          name: `${EMOJIS.VS || '⚡'} VS`,
-          value: '\u200B',
+          name: `${EMOJIS.VS || '⚡'}`,
+          value: '**VS**',
           inline: true
         },
         {
           name: `${EMOJIS.KATANA || '⚔️'} ${p2Name}`,
           value:
-            `**Rango:** ${p2Data.rank || 'Ronin'}\n` +
-            `**Honor:** ${p2Data.honor || 0}\n` +
-            `**Bio:** *"${p2Data.bio || 'Un guerrero misterioso...'}"*`,
+            `**Rango:** ${p2Data?.rank || 'Ronin'}\n` +
+            `**Honor:** ${p2Data?.honor || 0}\n` +
+            `**Bio:** *"${p2Bio}"*`,
           inline: true
         }
       )
-      .setFooter({
-        text: 'hoy a las ' + new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
-      });
+      .setTimestamp();
 
-    // MEJORA 1: Avatares en las esquinas
-    // Avatar P2 en thumbnail (esquina superior derecha)
-    if (p2Avatar) {
-      embed.setThumbnail(p2Avatar);
+    // MEJORA 1: Avatares en las esquinas (limitación de Discord: tamaños diferentes)
+    // Avatar P1 en thumbnail (esquina superior derecha) - MÁS GRANDE
+    if (p1Avatar) {
+      embed.setThumbnail(p1Avatar);
     }
 
-    // Avatar P1 en author icon (esquina superior izquierda)
-    if (p1Avatar) {
-      embed.setAuthor({
-        name: 'Combate de Honor',
-        iconURL: p1Avatar
-      });
+    // Avatar P2 en image (abajo, centrado) - GRANDE
+    // Usamos setImage para el segundo avatar para que sea visible y grande
+    if (p2Avatar) {
+      embed.setImage(p2Avatar);
     }
 
     return embed;
