@@ -9737,209 +9737,207 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
         }
 
-        // Verificar que el usuario está participando
-        if (!activeTournament.participants.includes(userId)) {
+        // Verificar que el usuario es admin o creador del evento
+        const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+        const isCreator = activeTournament.creatorId === userId;
+
+        if (!isAdmin && !isCreator) {
           return interaction.reply({
-            content: '❌ No estás participando en el torneo actual.',
+            content: `${EMOJIS.ERROR} Solo el creador del evento o administradores pueden registrar resultados.`,
             flags: MessageFlags.Ephemeral
           });
         }
 
         try {
-          const match = eventManager.getUserTournamentMatch(activeTournament.eventId, userId);
+          // Obtener todos los combates pendientes de la ronda actual
+          const bracket = activeTournament.metadata.bracket;
+          const currentRound = Math.max(...bracket.map(m => m.round));
+          const pendingMatches = bracket.filter(m => m.round === currentRound && !m.winner && m.player2); // Exclude BYEs
 
-          if (!match) {
+          if (pendingMatches.length === 0) {
             return interaction.reply({
-              content: '❌ No tienes combates pendientes para registrar.',
+              content: '❌ No hay combates pendientes en la ronda actual.',
               flags: MessageFlags.Ephemeral
             });
           }
 
-          const player1 = match.player1;
-          const player2 = match.player2;
-          const opponent = player1 === userId ? player2 : player1;
+          // Crear dropdown con los combates pendientes
+          const matchOptions = pendingMatches.map((match, index) => {
+            const p1User = interaction.client.users.cache.get(match.player1);
+            const p2User = interaction.client.users.cache.get(match.player2);
+            const p1Name = p1User?.username || 'Guerrero';
+            const p2Name = p2User?.username || 'Guerrero';
 
-          // Crear botones para seleccionar ganador
-          const winnerButtons = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`tournament_winner_${userId}`)
-              .setLabel('Yo gané')
-              .setStyle(ButtonStyle.Success)
-              .setEmoji('🏆'),
-            new ButtonBuilder()
-              .setCustomId(`tournament_winner_${opponent}`)
-              .setLabel(`${opponent === player1 ? 'Player 1' : 'Player 2'} ganó`)
-              .setStyle(ButtonStyle.Danger)
-              .setEmoji('💀')
-          );
+            return {
+              label: `${p1Name} vs ${p2Name}`,
+              description: `Ronda ${match.round}`,
+              value: `${match.player1}_${match.player2}`
+            };
+          });
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('tournament_match_select')
+            .setPlaceholder('Selecciona el combate a registrar')
+            .setMinValues(1)
+            .setMaxValues(1)
+            .addOptions(matchOptions);
+
+          const row = new ActionRowBuilder().addComponents(selectMenu);
 
           const embed = new EmbedBuilder()
             .setColor(COLORS.WARNING)
-            .setTitle('⚔️ Registrar Resultado del Combate')
+            .setTitle('⚔️ Registrar Resultado del Torneo')
             .setDescription(
-              `**Tu combate:** <@${player1}> vs <@${player2}>\n\n` +
-              `**Importante:** Ambos jugadores deben confirmar el mismo ganador.\n` +
-              `Selecciona quién ganó el combate:`
+              `**Torneo:** ${activeTournament.name}\n` +
+              `**Ronda Actual:** ${currentRound}\n\n` +
+              `Selecciona el combate del cual quieres registrar el resultado:`
             )
-            .setFooter({ text: 'La confirmación del oponente es necesaria' })
             .setTimestamp();
 
           await interaction.reply({
             embeds: [embed],
-            components: [winnerButtons],
+            components: [row],
             flags: MessageFlags.Ephemeral
           });
 
-          // Crear collector para los botones
+          // Collector para el dropdown
           const message = await interaction.fetchReply();
-          const collector = message.createMessageComponentCollector({
-            filter: (i) => i.user.id === userId,
+          const matchCollector = message.createMessageComponentCollector({
+            filter: (i) => i.user.id === userId && i.customId === 'tournament_match_select',
             time: 120000
           });
 
-          collector.on('collect', async (i) => {
-            await i.deferUpdate();
+          matchCollector.on('collect', async (matchInteraction) => {
+            await matchInteraction.deferUpdate();
 
-            const selectedWinner = i.customId.replace('tournament_winner_', '');
-            const loser = selectedWinner === player1 ? player2 : player1;
+            const [player1, player2] = matchInteraction.values[0].split('_');
 
-            // Crear clave única para las confirmaciones (usa siempre el mismo orden)
-            const matchKey = [player1, player2].sort().join('_');
-            if (!global.tournamentConfirmations) global.tournamentConfirmations = {};
-            if (!global.tournamentConfirmations[matchKey]) {
-              global.tournamentConfirmations[matchKey] = {};
-            }
+            const p1User = interaction.client.users.cache.get(player1);
+            const p2User = interaction.client.users.cache.get(player2);
+            const p1Name = p1User?.username || 'Jugador 1';
+            const p2Name = p2User?.username || 'Jugador 2';
 
-            // Registrar voto del usuario actual
-            global.tournamentConfirmations[matchKey][userId] = selectedWinner;
+            // Crear botones para seleccionar ganador
+            const winnerButtons = new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId(`tournament_winner_${player1}`)
+                .setLabel(p1Name)
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('🏆'),
+              new ButtonBuilder()
+                .setCustomId(`tournament_winner_${player2}`)
+                .setLabel(p2Name)
+                .setStyle(ButtonStyle.Danger)
+                .setEmoji('🏆')
+            );
 
-            // Verificar si ambos jugadores votaron
-            const confirmations = global.tournamentConfirmations[matchKey];
-            const votes = Object.keys(confirmations).length;
+            const winnerEmbed = new EmbedBuilder()
+              .setColor(COLORS.WARNING)
+              .setTitle('⚔️ Seleccionar Ganador')
+              .setDescription(
+                `**Combate:** <@${player1}> vs <@${player2}>\n\n` +
+                `Selecciona quién ganó este combate:`
+              )
+              .setTimestamp();
 
-            if (votes >= 2) {
-              // Ambos votaron, verificar si coinciden
-              const vote1 = confirmations[player1];
-              const vote2 = confirmations[player2];
+            await matchInteraction.editReply({
+              embeds: [winnerEmbed],
+              components: [winnerButtons]
+            });
 
-              if (vote1 === vote2) {
-                // Votos coinciden, registrar ganador
-                try {
-                  const tournamentResult = eventManager.recordTournamentWinner(activeTournament.eventId, selectedWinner, loser);
+            // Collector para los botones de ganador
+            const winnerCollector = message.createMessageComponentCollector({
+              filter: (i) => i.user.id === userId && i.customId.startsWith('tournament_winner_'),
+              time: 120000
+            });
 
-                  // Limpiar confirmaciones
-                  delete global.tournamentConfirmations[matchKey];
+            winnerCollector.on('collect', async (winnerInteraction) => {
+              await winnerInteraction.deferUpdate();
 
-                  const successEmbed = new EmbedBuilder()
-                    .setColor(COLORS.SUCCESS)
-                    .setTitle('✅ Resultado Registrado')
-                    .setDescription(
-                      `**Ganador:** <@${selectedWinner}>\n\n` +
-                      `El resultado ha sido confirmado por ambos jugadores.\n` +
-                      `<@${selectedWinner}> avanza a la siguiente ronda!`
-                    )
-                    .setTimestamp();
+              const selectedWinner = winnerInteraction.customId.replace('tournament_winner_', '');
+              const loser = selectedWinner === player1 ? player2 : player1;
 
-                  await i.editReply({
-                    embeds: [successEmbed],
-                    components: []
-                  });
+              try {
+                // Registrar ganador directamente
+                eventManager.recordTournamentWinner(activeTournament.eventId, selectedWinner, loser);
 
-                  // Notificar en el canal
-                  await interaction.channel.send({
-                    content: `🏆 **Resultado del Torneo**\n<@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
-                  });
-
-                  // Mostrar bracket actualizado
-                  const bracketEmbed = eventManager.generateBracketEmbed(activeTournament.eventId, interaction.client);
-                  await interaction.channel.send({
-                    content: '📊 **Bracket Actualizado:**',
-                    embeds: [bracketEmbed]
-                  });
-
-                  // Si se avanzó a una nueva ronda, anunciar los nuevos combates
-                  const updatedTournament = eventManager.getEvent(activeTournament.eventId);
-                  if (updatedTournament.metadata.roundAdvanced) {
-                    // Resetear flag
-                    updatedTournament.metadata.roundAdvanced = false;
-                    eventManager.saveEvents();
-
-                    // Obtener los combates de la nueva ronda
-                    const bracket = updatedTournament.metadata.bracket;
-                    const currentRound = Math.max(...bracket.map(m => m.round));
-                    const newRoundMatches = bracket.filter(m => m.round === currentRound && !m.winner);
-
-                    if (newRoundMatches.length > 0) {
-                      // Anunciar nueva ronda
-                      await interaction.channel.send({
-                        content: `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${currentRound}** del torneo **${updatedTournament.name}**\n\n**Combates de esta ronda:**`
-                      });
-
-                      // Anunciar cada combate con embed visual
-                      for (const match of newRoundMatches) {
-                        if (!match.player2) continue; // Skip BYEs
-
-                        const p1Data = dataManager.getUser(match.player1, guildId);
-                        const p2Data = dataManager.getUser(match.player2, guildId);
-                        const matchEmbed = eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client);
-
-                        await interaction.channel.send({ embeds: [matchEmbed] });
-
-                        // Pequeño delay para evitar rate limit
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                      }
-                    }
-                  }
-
-                  collector.stop();
-                } catch (error) {
-                  console.error('Error al registrar ganador del torneo:', error);
-                  await i.editReply({
-                    content: `❌ Error al registrar el resultado: ${error.message}`,
-                    components: []
-                  });
-                }
-              } else {
-                // Votos no coinciden
-                const errorEmbed = new EmbedBuilder()
-                  .setColor(COLORS.ERROR)
-                  .setTitle('❌ Votos no Coinciden')
+                const successEmbed = new EmbedBuilder()
+                  .setColor(COLORS.SUCCESS)
+                  .setTitle('✅ Resultado Registrado')
                   .setDescription(
-                    `Los dos jugadores seleccionaron ganadores diferentes.\n\n` +
-                    `Por favor, discutan el resultado y vuelvan a intentarlo.\n` +
-                    `Se han borrado los votos anteriores.`
+                    `**Ganador:** <@${selectedWinner}>\n\n` +
+                    `<@${selectedWinner}> avanza a la siguiente ronda!`
                   )
                   .setTimestamp();
 
-                // Limpiar confirmaciones para reintentar
-                delete global.tournamentConfirmations[matchKey];
-
-                await i.editReply({
-                  embeds: [errorEmbed],
+                await winnerInteraction.editReply({
+                  embeds: [successEmbed],
                   components: []
                 });
-                collector.stop();
-              }
-            } else {
-              // Solo un jugador ha votado
-              const waitingEmbed = new EmbedBuilder()
-                .setColor(COLORS.INFO)
-                .setTitle('⏳ Esperando Confirmación')
-                .setDescription(
-                  `Has seleccionado a <@${selectedWinner}> como ganador.\n\n` +
-                  `Esperando a que <@${opponent}> confirme el resultado usando \`/torneo registrar\`.`
-                )
-                .setTimestamp();
 
-              await i.editReply({
-                embeds: [waitingEmbed],
-                components: []
-              });
-              collector.stop();
-            }
+                // Notificar en el canal
+                await interaction.channel.send({
+                  content: `🏆 **Resultado del Torneo**\n<@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
+                });
+
+                // Mostrar bracket actualizado
+                const bracketEmbed = eventManager.generateBracketEmbed(activeTournament.eventId, interaction.client);
+                await interaction.channel.send({
+                  content: '📊 **Bracket Actualizado:**',
+                  embeds: [bracketEmbed]
+                });
+
+                // Si se avanzó a una nueva ronda, anunciar los nuevos combates
+                const updatedTournament = eventManager.getEvent(activeTournament.eventId);
+                if (updatedTournament.metadata.roundAdvanced) {
+                  // Resetear flag
+                  updatedTournament.metadata.roundAdvanced = false;
+                  eventManager.saveEvents();
+
+                  // Obtener los combates de la nueva ronda
+                  const newBracket = updatedTournament.metadata.bracket;
+                  const newCurrentRound = Math.max(...newBracket.map(m => m.round));
+                  const newRoundMatches = newBracket.filter(m => m.round === newCurrentRound && !m.winner);
+
+                  if (newRoundMatches.length > 0) {
+                    // Anunciar nueva ronda
+                    await interaction.channel.send({
+                      content: `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${newCurrentRound}** del torneo **${updatedTournament.name}**\n\n**Combates de esta ronda:**`
+                    });
+
+                    // Anunciar cada combate con embed visual
+                    for (const match of newRoundMatches) {
+                      if (!match.player2) continue; // Skip BYEs
+
+                      const p1Data = dataManager.getUser(match.player1, guildId);
+                      const p2Data = dataManager.getUser(match.player2, guildId);
+                      const matchEmbed = eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client);
+
+                      await interaction.channel.send({ embeds: [matchEmbed] });
+
+                      // Pequeño delay para evitar rate limit
+                      await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                  }
+                }
+
+                matchCollector.stop();
+                winnerCollector.stop();
+              } catch (error) {
+                console.error('Error al registrar ganador del torneo:', error);
+                await winnerInteraction.editReply({
+                  content: `❌ Error al registrar el resultado: ${error.message}`,
+                  components: []
+                });
+              }
+            });
+
+            winnerCollector.on('end', () => {
+              // Timeout
+            });
           });
 
-          collector.on('end', () => {
+          matchCollector.on('end', () => {
             // Timeout
           });
         } catch (error) {
