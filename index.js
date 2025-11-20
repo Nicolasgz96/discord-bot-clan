@@ -6671,11 +6671,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 eventManager.endEvent(event.id);
                 const winners = eventManager.awardPrizes(event.id, dataManager);
 
+                // Ordenar ganadores por rank (1, 2, 3...)
+                winners.sort((a, b) => a.rank - b.rank);
+
                 const winnersText = await Promise.all(winners.map(async w => {
-                  const user = await client.users.fetch(w.userId).catch(() => null);
-                  const username = user ? user.username : 'Usuario desconocido';
+                  // Usar displayName del servidor en lugar de username
+                  const displayName = await eventManager.getDisplayName(client, guildId, w.userId);
                   const medal = w.rank === 1 ? '🥇' : w.rank === 2 ? '🥈' : '🥉';
-                  let text = `${medal} **${username}** - ${w.score} puntos\n`;
+                  let text = `${medal} **${displayName}** - ${w.score} puntos\n`;
                   text += `   Recompensa: ${w.prize.koku || 0} ${EMOJIS.KOKU}`;
                   if (w.prize.title) text += ` + "${w.prize.title}"`;
                   return text;
@@ -6749,11 +6752,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
           eventManager.endEvent(event.id);
           const winners = eventManager.awardPrizes(event.id, dataManager);
 
+          // Ordenar ganadores por rank (1, 2, 3...)
+          winners.sort((a, b) => a.rank - b.rank);
+
           const winnersText = await Promise.all(winners.map(async w => {
-            const user = await client.users.fetch(w.userId).catch(() => null);
-            const username = user ? user.username : 'Usuario desconocido';
+            // Usar displayName del servidor en lugar de username
+            const displayName = await eventManager.getDisplayName(client, guildId, w.userId);
             const medal = w.rank === 1 ? '🥇' : w.rank === 2 ? '🥈' : '🥉';
-            let text = `${medal} **${username}** - ${w.score} puntos\n`;
+            let text = `${medal} **${displayName}** - ${w.score} puntos\n`;
             text += `   Recompensa: ${w.prize.koku || 0} ${EMOJIS.KOKU}`;
             if (w.prize.title) text += ` + "${w.prize.title}"`;
             return text;
