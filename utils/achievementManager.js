@@ -308,14 +308,14 @@ const ACHIEVEMENTS = {
 
   master_recruiter: {
     id: 'master_recruiter',
-    name: 'Amo Supremo',
-    nameEn: 'Supreme Master',
+    name: 'Esclavizador Supremo',
+    nameEn: 'Supreme Enslaver',
     description: 'Invita 20 personas al servidor',
     category: 'special',
     tier: 'gold',
-    emoji: '👑',
+    emoji: '👹',
     requirement: { type: 'invites', count: 20 },
-    reward: { koku: 5000, title: 'Amo Supremo' },
+    reward: { koku: 5000, title: 'Esclavizador Supremo' },
     hidden: false
   },
 
