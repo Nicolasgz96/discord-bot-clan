@@ -303,7 +303,8 @@ const ACHIEVEMENTS = {
     emoji: '⛓️',
     requirement: { type: 'invites', count: 5 },
     reward: { koku: 1000, title: 'El Esclavizador' },
-    hidden: false
+    hidden: false,
+    restrictedTo: '615330007153246209' // Solo este usuario puede obtener este logro
   },
 
   master_recruiter: {
@@ -495,6 +496,11 @@ function checkAchievements(userId, guildId, userData) {
     // Skip if already has it
     if (hasAchievement(userId, guildId, id)) continue;
 
+    // Skip if achievement is restricted to specific user
+    if (achievement.restrictedTo && achievement.restrictedTo !== userId) {
+      continue;
+    }
+
     let meetsRequirement = false;
 
     // Check requirement
@@ -603,6 +609,10 @@ function getUserAchievements(userId, guildId) {
         unlockedAt: userData.achievementUnlockedAt?.[id] || null
       });
     } else if (!achievement.hidden) {
+      // Don't show restricted achievements to other users
+      if (achievement.restrictedTo && achievement.restrictedTo !== userId) {
+        continue;
+      }
       locked.push(achievement);
     }
   }
@@ -653,6 +663,72 @@ function getAchievementLeaderboard(guildId, limit = 10) {
   return leaderboard;
 }
 
+/**
+ * Get user's featured badges (prestigious achievements to display)
+ * @param {string} userId - User ID
+ * @param {string} guildId - Guild ID
+ * @param {number} limit - Max number of badges to return
+ * @returns {Array<Object>} Array of badge objects
+ */
+function getFeaturedBadges(userId, guildId, limit = 5) {
+  const userData = dataManager.getUser(userId, guildId);
+  const userAchievements = userData.achievements || [];
+
+  // Priority order: legendary > platinum > gold > with titles
+  const tierPriority = { legendary: 4, platinum: 3, gold: 2, silver: 1, bronze: 0 };
+
+  const badges = userAchievements
+    .map(id => ACHIEVEMENTS[id])
+    .filter(ach => ach) // Remove undefined
+    .sort((a, b) => {
+      // First sort by tier priority
+      const tierDiff = tierPriority[b.tier] - tierPriority[a.tier];
+      if (tierDiff !== 0) return tierDiff;
+
+      // Then prioritize achievements with title rewards
+      const aHasTitle = a.reward?.title ? 1 : 0;
+      const bHasTitle = b.reward?.title ? 1 : 0;
+      return bHasTitle - aHasTitle;
+    })
+    .slice(0, limit)
+    .map(ach => ({
+      name: ach.name,
+      emoji: ach.emoji,
+      tier: ach.tier,
+      tierEmoji: TIER_INFO[ach.tier].emoji,
+      tierName: TIER_INFO[ach.tier].name,
+      color: TIER_INFO[ach.tier].color
+    }));
+
+  return badges;
+}
+
+/**
+ * Format badges for display in embed
+ * @param {Array<Object>} badges - Badge objects
+ * @returns {string} Formatted string
+ */
+function formatBadgesDisplay(badges) {
+  if (!badges || badges.length === 0) {
+    return '*No hay insignias desbloqueadas*';
+  }
+
+  return badges
+    .map(badge => `${badge.emoji} **${badge.name}** ${badge.tierEmoji}`)
+    .join('\n');
+}
+
+/**
+ * Get user's rarest achievement (for special display/nickname)
+ * @param {string} userId - User ID
+ * @param {string} guildId - Guild ID
+ * @returns {Object|null} Achievement object or null
+ */
+function getRarestAchievement(userId, guildId) {
+  const badges = getFeaturedBadges(userId, guildId, 1);
+  return badges.length > 0 ? badges[0] : null;
+}
+
 module.exports = {
   ACHIEVEMENTS,
   TIER_INFO,
@@ -661,5 +737,8 @@ module.exports = {
   awardAchievement,
   checkAchievements,
   getUserAchievements,
-  getAchievementLeaderboard
+  getAchievementLeaderboard,
+  getFeaturedBadges,
+  formatBadgesDisplay,
+  getRarestAchievement
 };

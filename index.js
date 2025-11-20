@@ -5672,6 +5672,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
       }
 
+      // Agregar insignias de logros destacados
+      const achievementManager = require('./utils/achievementManager');
+      const featuredBadges = achievementManager.getFeaturedBadges(userId, guildId, 5);
+      const badgesDisplay = achievementManager.formatBadgesDisplay(featuredBadges);
+
+      embed.addFields({
+        name: '🏆 Insignias de Logros',
+        value: badgesDisplay,
+        inline: false
+      });
+
       embed.addFields(
           {
             name: MESSAGES.PROFILE.STATS_TITLE,
