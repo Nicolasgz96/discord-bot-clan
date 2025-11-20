@@ -1560,13 +1560,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
 
       // Actualizar mensaje de control con el siguiente combate
-      const newControlData = eventManager.generateTournamentControlMessage(tournament.id, interaction.client);
+      const newControlData = await eventManager.generateTournamentControlMessage(tournament.id, interaction.client);
 
       if (newControlData) {
-        await interaction.message.edit({
+        console.log(`🎮 Hay más combates pendientes, enviando nuevo panel de control...`);
+        // Enviar nuevo panel de control como followUp efímero
+        // (no podemos editar el mensaje original porque es ephemeral de otra interacción)
+        const newControlMessage = await interaction.followUp({
+          content: `🏆 **Panel de Control del Torneo**\n\nSelecciona el ganador del siguiente combate:`,
           embeds: [newControlData.embed],
-          components: newControlData.components
+          components: newControlData.components,
+          ephemeral: true,
+          fetchReply: true
         });
+
+        // Actualizar el ID del mensaje de control para el próximo clic
+        const updatedTournament = eventManager.getEvent(tournament.id);
+        if (updatedTournament) {
+          updatedTournament.metadata.controlMessageId = newControlMessage.id;
+          eventManager.saveEvents();
+          console.log(`🔄 Panel de control actualizado: ${newControlMessage.id}`);
+        }
+      } else {
+        // No hay más combates, torneo terminado
+        console.log(`🏁 Torneo completado, no hay más combates. Enviando mensaje final...`);
+        await interaction.followUp({
+          content: `✅ **¡Torneo completado!** No hay más combates pendientes.\n\nUsa \`/evento finalizar evento:${tournament.name}\` para otorgar premios.`,
+          ephemeral: true
+        });
+        console.log(`✅ Mensaje de torneo completado enviado`);
       }
 
       console.log(`✅ Resultado registrado: ${selectedWinner} ganó en torneo ${tournament.id}`);
