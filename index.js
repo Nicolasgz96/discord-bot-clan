@@ -6190,12 +6190,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos pending o active (ignorar cancelled/completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              (e.status === EVENT_STATUS.PENDING || e.status === EVENT_STATUS.ACTIVE)
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" disponible para unirse.`,
               flags: MessageFlags.Ephemeral
             });
           }
@@ -6413,12 +6417,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos pending (no se puede salir de eventos activos, cancelled o completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              e.status === EVENT_STATUS.PENDING
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" en estado pendiente.`,
               flags: MessageFlags.Ephemeral
             });
           }
@@ -6725,12 +6733,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos pending (ignorar cancelled/completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              e.status === EVENT_STATUS.PENDING
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" en estado pendiente.`,
               flags: MessageFlags.Ephemeral
             });
           }
@@ -7024,12 +7036,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos active (no se puede finalizar pending, cancelled o completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              e.status === EVENT_STATUS.ACTIVE
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" en estado activo.`,
               flags: MessageFlags.Ephemeral
             });
           }
@@ -7202,12 +7218,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos pending o active (no se puede cancelar eventos ya cancelled/completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              (e.status === EVENT_STATUS.PENDING || e.status === EVENT_STATUS.ACTIVE)
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" disponible para cancelar.`,
               flags: MessageFlags.Ephemeral
             });
           }
