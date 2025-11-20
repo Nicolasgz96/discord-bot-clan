@@ -7576,7 +7576,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   });
                 }
 
-                // Create embeds showing all submissions with images
+                // Create embeds showing all submissions with images (SIN mostrar votos)
                 const submissionEmbeds = await Promise.all(submissions.map(async ([submissionUserId, submission], index) => {
                   try {
                     const user = await interaction.client.users.fetch(submissionUserId);
@@ -7584,8 +7584,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                       .setColor(COLORS.PRIMARY)
                       .setAuthor({ name: `${index + 1}. ${user.username}`, iconURL: user.displayAvatarURL() })
                       .setDescription(
-                        `**Descripción:**\n${submission.description || 'Sin descripción'}\n\n` +
-                        `**Votos actuales:** ${submission.votes || 0} 🗳️`
+                        `**Descripción:**\n${submission.description || 'Sin descripción'}`
                       )
                       .setImage(submission.imageUrl)
                       .setFooter({ text: `Enviado ${new Date(submission.submittedAt).toLocaleDateString()}` });
@@ -7595,8 +7594,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                       .setColor(COLORS.PRIMARY)
                       .setAuthor({ name: `${index + 1}. Usuario ${submissionUserId}` })
                       .setDescription(
-                        `**Descripción:**\n${submission.description || 'Sin descripción'}\n\n` +
-                        `**Votos actuales:** ${submission.votes || 0} 🗳️`
+                        `**Descripción:**\n${submission.description || 'Sin descripción'}`
                       )
                       .setImage(submission.imageUrl)
                       .setFooter({ text: `Enviado ${new Date(submission.submittedAt).toLocaleDateString()}` });
@@ -7604,19 +7602,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   }
                 }));
 
-                // Create dropdown for user submissions
+                // Create dropdown for user submissions (SIN mostrar votos)
                 const userOptions = await Promise.all(submissions.map(async ([submissionUserId, submission], index) => {
                   try {
                     const user = await interaction.client.users.fetch(submissionUserId);
                     return new StringSelectMenuOptionBuilder()
                       .setLabel(`${index + 1}. ${user.username}`.substring(0, 100))
-                      .setDescription(`${submission.votes || 0} votos`.substring(0, 100))
+                      .setDescription(`Construcción #${index + 1}`.substring(0, 100))
                       .setValue(submissionUserId)
                       .setEmoji('🗳️');
                   } catch (error) {
                     return new StringSelectMenuOptionBuilder()
                       .setLabel(`${index + 1}. Usuario ${submissionUserId}`.substring(0, 100))
-                      .setDescription(`${submission.votes || 0} votos`.substring(0, 100))
+                      .setDescription(`Construcción #${index + 1}`.substring(0, 100))
                       .setValue(submissionUserId)
                       .setEmoji('🗳️');
                   }
