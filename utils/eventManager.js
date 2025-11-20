@@ -602,6 +602,92 @@ class EventManager {
   }
 
   /**
+   * Generate visual bracket embed for tournament
+   */
+  generateBracketEmbed(eventId, client) {
+    const { EmbedBuilder } = require('discord.js');
+    const COLORS = require('../src/config/colors');
+    const EMOJIS = require('../src/config/emojis');
+
+    const bracketData = this.getTournamentBracket(eventId);
+    const { event, rounds, currentRound, totalRounds } = bracketData;
+
+    const embed = new EmbedBuilder()
+      .setColor(event.status === 'completed' ? COLORS.SUCCESS : COLORS.PRIMARY)
+      .setTitle(`🏆 ${event.name} - Bracket`)
+      .setDescription(
+        `**Participantes:** ${event.participants.length}\n` +
+        `**Ronda Actual:** ${currentRound}/${totalRounds}\n` +
+        `**Estado:** ${event.status === 'active' ? '🟢 Activo' : event.status === 'completed' ? '✅ Finalizado' : '⚫ Pendiente'}`
+      )
+      .setTimestamp();
+
+    // Agregar cada ronda
+    for (let round = 1; round <= currentRound; round++) {
+      const matches = rounds[round] || [];
+      let roundText = '';
+
+      for (let i = 0; i < matches.length; i++) {
+        const match = matches[i];
+        const player1User = client.users.cache.get(match.player1);
+        const player2User = match.player2 ? client.users.cache.get(match.player2) : null;
+
+        const p1Name = player1User?.username || 'Guerrero';
+        const p2Name = player2User?.username || 'BYE';
+
+        if (match.winner) {
+          const winnerUser = client.users.cache.get(match.winner);
+          const winnerName = winnerUser?.username || 'Ganador';
+          roundText += `✅ ${p1Name} vs ${p2Name} → **${winnerName}**\n`;
+        } else {
+          roundText += `⏳ ${p1Name} vs ${p2Name}\n`;
+        }
+      }
+
+      const roundName = round === currentRound && event.status === 'active'
+        ? `⚔️ Ronda ${round} (ACTUAL)`
+        : `📊 Ronda ${round}`;
+
+      embed.addFields({
+        name: roundName,
+        value: roundText || 'Sin combates',
+        inline: false
+      });
+    }
+
+    // Si está completo, mostrar podio
+    if (event.status === 'completed' && event.results) {
+      const champion = Object.keys(event.results).find(id => event.results[id].rank === 1);
+      const runnerUp = Object.keys(event.results).find(id => event.results[id].rank === 2);
+      const thirdPlace = Object.keys(event.results).find(id => event.results[id].rank === 3);
+
+      let winnersText = '';
+      if (champion) {
+        const champUser = client.users.cache.get(champion);
+        winnersText += `🥇 **${champUser?.username || 'Campeón'}**\n`;
+      }
+      if (runnerUp) {
+        const runnerUser = client.users.cache.get(runnerUp);
+        winnersText += `🥈 **${runnerUser?.username || 'Subcampeón'}**\n`;
+      }
+      if (thirdPlace) {
+        const thirdUser = client.users.cache.get(thirdPlace);
+        winnersText += `🥉 **${thirdUser?.username || '3er Lugar'}**\n`;
+      }
+
+      if (winnersText) {
+        embed.addFields({
+          name: '🏆 Podio Final',
+          value: winnersText,
+          inline: false
+        });
+      }
+    }
+
+    return embed;
+  }
+
+  /**
    * Get user's current tournament match
    */
   getUserTournamentMatch(eventId, userId) {

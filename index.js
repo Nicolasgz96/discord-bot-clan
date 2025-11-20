@@ -6559,6 +6559,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   `• Cuando todos los combates terminen, la siguiente ronda comenzará automáticamente\n\n` +
                   `¡Que gane el mejor guerrero! 🏆`
               });
+
+              // Mostrar bracket inicial completo
+              const initialBracketEmbed = eventManager.generateBracketEmbed(event.id, interaction.client);
+              await interaction.channel.send({
+                content: '📊 **Bracket del Torneo:**',
+                embeds: [initialBracketEmbed]
+              });
             }
           }
         } catch (error) {
@@ -9654,68 +9661,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         try {
-          const bracketData = eventManager.getTournamentBracket(activeTournament.eventId);
-          const { event, rounds, currentRound, totalRounds } = bracketData;
-
-          // Construir embed del bracket
-          const embed = new EmbedBuilder()
-            .setColor(COLORS.PRIMARY)
-            .setTitle('🏆 Bracket del Torneo - ' + event.name)
-            .setDescription(
-              `**Participantes:** ${event.participants.length}\n` +
-              `**Ronda Actual:** ${currentRound}/${totalRounds}\n` +
-              `**Estado:** ${event.status === 'active' ? '🟢 Activo' : '⚫ Finalizado'}`
-            )
-            .setTimestamp();
-
-          // Agregar campos para cada ronda
-          for (let round = 1; round <= currentRound; round++) {
-            const matches = rounds[round] || [];
-            let roundText = '';
-
-            for (let i = 0; i < matches.length; i++) {
-              const match = matches[i];
-              const player1 = match.player1 ? `<@${match.player1}>` : 'BYE';
-              const player2 = match.player2 ? `<@${match.player2}>` : 'BYE';
-              const winner = match.winner ? `<@${match.winner}>` : '⏳ Pendiente';
-
-              roundText += `**Combate ${i + 1}:**\n`;
-              roundText += `${player1} vs ${player2}\n`;
-              roundText += `Ganador: ${winner}\n\n`;
-            }
-
-            const roundName = round === currentRound && event.status === 'active'
-              ? `⚔️ Ronda ${round} (ACTUAL)`
-              : `📊 Ronda ${round}`;
-
-            embed.addFields({
-              name: roundName,
-              value: roundText || 'Sin combates',
-              inline: false
-            });
-          }
-
-          // Si el torneo está completo, mostrar ganadores
-          if (event.status === 'completed' && event.results) {
-            const champion = Object.keys(event.results).find(id => event.results[id].rank === 1);
-            const runnerUp = Object.keys(event.results).find(id => event.results[id].rank === 2);
-            const thirdPlace = Object.keys(event.results).find(id => event.results[id].rank === 3);
-
-            let winnersText = '';
-            if (champion) winnersText += `🥇 **Campeón:** <@${champion}>\n`;
-            if (runnerUp) winnersText += `🥈 **Subcampeón:** <@${runnerUp}>\n`;
-            if (thirdPlace) winnersText += `🥉 **Tercer Lugar:** <@${thirdPlace}>\n`;
-
-            if (winnersText) {
-              embed.addFields({
-                name: '🏆 Podio Final',
-                value: winnersText,
-                inline: false
-              });
-            }
-          }
-
-          return interaction.reply({ embeds: [embed] });
+          // Usar la nueva función de bracket visual
+          const bracketEmbed = eventManager.generateBracketEmbed(activeTournament.eventId, interaction.client);
+          return interaction.reply({ embeds: [bracketEmbed] });
         } catch (error) {
           console.error('Error al obtener bracket del torneo:', error);
           return interaction.reply({
@@ -9900,6 +9848,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   // Notificar en el canal
                   await interaction.channel.send({
                     content: `🏆 **Resultado del Torneo**\n<@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
+                  });
+
+                  // Mostrar bracket actualizado
+                  const bracketEmbed = eventManager.generateBracketEmbed(activeTournament.eventId, interaction.client);
+                  await interaction.channel.send({
+                    content: '📊 **Bracket Actualizado:**',
+                    embeds: [bracketEmbed]
                   });
 
                   // Si se avanzó a una nueva ronda, anunciar los nuevos combates
