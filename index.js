@@ -6081,6 +6081,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (join): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager, EVENT_STATUS } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_join_select') {
                 const selectedEventId = i.values[0];
@@ -6323,6 +6333,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (leave): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_leave_select') {
                 const selectedEventId = i.values[0];
@@ -6534,6 +6554,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
 
             collector.on('collect', async (i) => {
+              // Si handlers/events.js ya manejó esta interacción, saltar
+              if (i.replied || i.deferred) {
+                console.log(`🔄 Collector (view): Interaction ${i.id} already handled, skipping`);
+                return;
+              }
+
+              // Importar eventManager dinámicamente para evitar problemas de closure
+              const { getEventManager } = require('./utils/eventManager');
+              const eventManager = getEventManager();
+
               try {
                 if (i.customId === 'event_view_select') {
                   const selectedEventId = i.values[0];
@@ -6764,6 +6794,55 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setTimestamp();
 
           await interaction.reply({ embeds: [embed] });
+
+          // Si es un torneo de duelos, anunciar combates y enviar panel de control
+          if (event.type === 'duel_tournament' && event.metadata.bracket) {
+            const bracket = event.metadata.bracket;
+            const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
+
+            if (firstRoundMatches.length > 0) {
+              await interaction.channel.send({
+                content: `\n🎊 **¡TORNEO INICIADO!** 🎊\n**${event.name}**\n\n**Combates de la primera ronda:**`
+              });
+
+              // Anunciar cada combate de la primera ronda
+              for (const match of firstRoundMatches) {
+                const p1Data = dataManager.getUser(match.player1, guildId);
+                const p2Data = dataManager.getUser(match.player2, guildId);
+
+                const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, client, guildId);
+                const matchMessage = await interaction.channel.send({ embeds: [matchEmbed] });
+
+                // Guardar ID del primer mensaje como announcementMessageId
+                if (!event.metadata.announcementMessageId) {
+                  event.metadata.announcementMessageId = matchMessage.id;
+                  eventManager.saveEvents();
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+
+              // Enviar mensaje de control (solo visible para el creador)
+              const controlData = await eventManager.generateTournamentControlMessage(event.id, client);
+
+              if (controlData) {
+                const controlMessage = await interaction.followUp({
+                  content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
+                  embeds: [controlData.embed],
+                  components: controlData.components,
+                  ephemeral: true,
+                  fetchReply: true
+                });
+
+                // Guardar ID del mensaje de control
+                event.metadata.controlMessageId = controlMessage.id;
+                eventManager.saveEvents();
+
+                console.log(`✅ Mensaje de control creado: ${controlMessage.id} para torneo ${event.id}`);
+              }
+            }
+          }
+
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} inició evento: ${event.name}`);
 
           // Actualizar mensaje de anuncio del evento (cambiar estado a Activo)
@@ -6936,6 +7015,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (finalize): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_finalize_select') {
                 const eventId = i.values[0];
@@ -6964,11 +7053,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 eventManager.endEvent(event.id);
                 const winners = eventManager.awardPrizes(event.id, dataManager);
 
+                // Ordenar ganadores por rank (1, 2, 3...)
+                winners.sort((a, b) => a.rank - b.rank);
+
                 const winnersText = await Promise.all(winners.map(async w => {
-                  const user = await client.users.fetch(w.userId).catch(() => null);
-                  const username = user ? user.username : 'Usuario desconocido';
+                  // Usar displayName del servidor en lugar de username
+                  const displayName = await eventManager.getDisplayName(client, guildId, w.userId);
                   const medal = w.rank === 1 ? '🥇' : w.rank === 2 ? '🥈' : '🥉';
-                  let text = `${medal} **${username}** - ${w.score} puntos\n`;
+                  let text = `${medal} **${displayName}** - ${w.score} puntos\n`;
                   text += `   Recompensa: ${w.prize.koku || 0} ${EMOJIS.KOKU}`;
                   if (w.prize.title) text += ` + "${w.prize.title}"`;
                   return text;
@@ -6981,7 +7073,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
                   .setTimestamp();
 
-                await i.editReply({ embeds: [finalEmbed], components: [] });
+                // Enviar anuncio PÚBLICO de ganadores (visible para todos)
+                await i.channel.send({ embeds: [finalEmbed] });
+
+                // Actualizar mensaje ephemeral con confirmación
+                await i.editReply({
+                  content: `✅ **Evento finalizado y premios otorgados**\n\nLos ganadores han sido anunciados en el canal.`,
+                  embeds: [],
+                  components: []
+                });
 
                 // Notify winners via DM
                 for (const winner of winners) {
@@ -7055,11 +7155,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
           eventManager.endEvent(event.id);
           const winners = eventManager.awardPrizes(event.id, dataManager);
 
+          // Ordenar ganadores por rank (1, 2, 3...)
+          winners.sort((a, b) => a.rank - b.rank);
+
           const winnersText = await Promise.all(winners.map(async w => {
-            const user = await client.users.fetch(w.userId).catch(() => null);
-            const username = user ? user.username : 'Usuario desconocido';
+            // Usar displayName del servidor en lugar de username
+            const displayName = await eventManager.getDisplayName(client, guildId, w.userId);
             const medal = w.rank === 1 ? '🥇' : w.rank === 2 ? '🥈' : '🥉';
-            let text = `${medal} **${username}** - ${w.score} puntos\n`;
+            let text = `${medal} **${displayName}** - ${w.score} puntos\n`;
             text += `   Recompensa: ${w.prize.koku || 0} ${EMOJIS.KOKU}`;
             if (w.prize.title) text += ` + "${w.prize.title}"`;
             return text;
@@ -7168,6 +7271,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (cancel): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_cancel_select') {
                 const eventId = i.values[0];
@@ -7396,6 +7509,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Si handlers/events.js ya manejó esta interacción, saltar
+            if (i.replied || i.deferred) {
+              console.log(`🔄 Collector (vote): Interaction ${i.id} already handled, skipping`);
+              return;
+            }
+
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_vote_select_event') {
                 const selectedEventId = i.values[0];
