@@ -1588,13 +1588,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Verificar si el comando de eventos debe ejecutarse en el canal de logros
   if (achievementsCommands.includes(commandName)) {
     if (config.achievementsChannel && config.achievementsChannel.enabled && config.achievementsChannel.channelId) {
+      // DEBUG: Log para verificar IDs
+      console.log(`[EVENTO DEBUG] Canal actual: "${interaction.channel.id}" (${typeof interaction.channel.id})`);
+      console.log(`[EVENTO DEBUG] Canal config: "${config.achievementsChannel.channelId}" (${typeof config.achievementsChannel.channelId})`);
+      console.log(`[EVENTO DEBUG] ¿Son iguales?: ${interaction.channel.id === config.achievementsChannel.channelId}`);
+
       if (interaction.channel.id !== config.achievementsChannel.channelId) {
         const achievementsChannel = interaction.guild.channels.cache.get(config.achievementsChannel.channelId);
         const channelName = achievementsChannel ? achievementsChannel.name : 'el canal de logros';
         const channelMention = achievementsChannel ? `<#${config.achievementsChannel.channelId}>` : 'el canal de logros';
 
         return interaction.reply({
-          content: `❌ Los comandos de eventos solo pueden usarse en ${channelMention} (**${channelName}**).`,
+          content: `❌ Los comandos de eventos solo pueden usarse en ${channelMention} (**${channelName}**).\n\n` +
+            `**DEBUG:** Tu canal actual: \`${interaction.channel.id}\`\n` +
+            `**DEBUG:** Canal requerido: \`${config.achievementsChannel.channelId}\``,
           flags: MessageFlags.Ephemeral
         });
       }
