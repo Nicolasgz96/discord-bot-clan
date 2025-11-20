@@ -1240,10 +1240,7 @@ class EventManager {
 
     // Avatar pequeño del Jugador 2 en footer (abajo)
     if (p2Avatar) {
-      embed.setFooter({
-        text: p2Name,
-        iconURL: p2Avatar
-      });
+     embed.setThumbnail(p2Avatar);
     }
 
     return embed;
