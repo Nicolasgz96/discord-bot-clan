@@ -293,6 +293,32 @@ const ACHIEVEMENTS = {
 
   // ========== SPECIAL ACHIEVEMENTS ==========
 
+  recruiter: {
+    id: 'recruiter',
+    name: 'Reclutador',
+    nameEn: 'Recruiter',
+    description: 'Invita 5 personas al servidor',
+    category: 'special',
+    tier: 'silver',
+    emoji: '📣',
+    requirement: { type: 'invites', count: 5 },
+    reward: { koku: 1000, title: 'Reclutador' },
+    hidden: false
+  },
+
+  master_recruiter: {
+    id: 'master_recruiter',
+    name: 'Maestro Reclutador',
+    nameEn: 'Master Recruiter',
+    description: 'Invita 20 personas al servidor',
+    category: 'special',
+    tier: 'gold',
+    emoji: '📢',
+    requirement: { type: 'invites', count: 20 },
+    reward: { koku: 5000, title: 'Cazatalentos' },
+    hidden: false
+  },
+
   founder: {
     id: 'founder',
     name: 'Fundador del Servidor',
@@ -539,6 +565,10 @@ function checkAchievements(userId, guildId, userData) {
       case 'memberNumber':
         // Special handling for early adopter achievements
         meetsRequirement = (userData.memberNumber || Infinity) <= achievement.requirement.count;
+        break;
+
+      case 'invites':
+        meetsRequirement = (userData.stats?.invitesCount || 0) >= achievement.requirement.count;
         break;
     }
 

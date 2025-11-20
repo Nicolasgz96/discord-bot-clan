@@ -8,10 +8,11 @@ const { createWelcomeCard } = require('../utils/welcomeCard');
 const { sendWithRetry } = require('../utils/helpers');
 const EMOJIS = require('../src/config/emojis');
 const MESSAGES = require('../src/config/messages');
+const achievementManager = require('../utils/achievementManager');
 
 module.exports = {
   name: Events.GuildMemberAdd,
-  async execute(member, { config, dataManager }) {
+  async execute(member, { config, dataManager, client }) {
     // ========== ASIGNACIÓN AUTOMÁTICA DE ROL ==========
     if (config.autoRole && config.autoRole.enabled && config.autoRole.roleId) {
       try {
@@ -64,6 +65,71 @@ module.exports = {
       }
     }
     // ========== FIN ASIGNACIÓN AUTOMÁTICA DE ROL ==========
+
+    // ========== TRACKING DE INVITACIONES ==========
+    try {
+      // Obtener todas las invitaciones del servidor
+      const invites = await member.guild.invites.fetch();
+
+      // Verificar si tenemos invitaciones cacheadas desde el ready event
+      const cachedInvites = client.inviteCache?.get(member.guild.id) || new Map();
+
+      let inviterId = null;
+
+      // Comparar invitaciones para encontrar cuál se usó
+      for (const [code, invite] of invites) {
+        const cachedInvite = cachedInvites.get(code);
+
+        // Si la invitación tiene más usos que antes, esta fue la usada
+        if (cachedInvite && invite.uses > cachedInvite.uses) {
+          inviterId = invite.inviter?.id;
+          break;
+        }
+      }
+
+      // Si encontramos quién invitó, incrementar su contador
+      if (inviterId && dataManager) {
+        const inviterData = dataManager.getUser(inviterId, member.guild.id);
+        if (!inviterData.stats) inviterData.stats = {};
+        inviterData.stats.invitesCount = (inviterData.stats.invitesCount || 0) + 1;
+        dataManager.dataModified.users = true;
+
+        console.log(`📣 ${inviterId} invitó a ${member.user.tag} (total invitaciones: ${inviterData.stats.invitesCount})`);
+
+        // Verificar logros de invitación
+        const newAchievements = achievementManager.checkAchievements(inviterId, member.guild.id, inviterData);
+
+        // Notificar sobre nuevos logros desbloqueados
+        if (newAchievements.length > 0 && config.achievementsChannel?.enabled) {
+          const achievementsChannel = member.guild.channels.cache.get(config.achievementsChannel.channelId);
+          if (achievementsChannel) {
+            for (const achievement of newAchievements) {
+              await sendWithRetry(achievementsChannel, {
+                content: `🎉 <@${inviterId}> ha desbloqueado el logro **${achievement.emoji} ${achievement.name}**!\n` +
+                        `*${achievement.description}*\n` +
+                        `**Recompensa:** +${achievement.reward?.koku || 0} ${EMOJIS.KOKU}` +
+                        (achievement.reward?.title ? ` + Título "${achievement.reward.title}"` : '')
+              });
+            }
+          }
+        }
+      }
+
+      // Actualizar cache de invitaciones
+      if (!client.inviteCache) client.inviteCache = new Map();
+      const newCache = new Map();
+      for (const [code, invite] of invites) {
+        newCache.set(code, { uses: invite.uses });
+      }
+      client.inviteCache.set(member.guild.id, newCache);
+
+    } catch (error) {
+      // Si no tenemos permisos para ver invitaciones, ignorar silenciosamente
+      if (error.code !== 50013) {
+        console.error(`⚠️ Error tracking invitaciones para ${member.user.tag}:`, error.message);
+      }
+    }
+    // ========== FIN TRACKING DE INVITACIONES ==========
 
     // Verificar si la función de bienvenida está activada
     if (!config.welcome.enabled) return;

@@ -252,6 +252,32 @@ module.exports = {
     client.isPurgeRunningFlag = () => isPurgeRunning;
     client.setPurgeRunning = (v) => { isPurgeRunning = Boolean(v); };
 
+    // Initialize invite cache for tracking invitations
+    try {
+      client.inviteCache = new Map();
+
+      for (const guild of client.guilds.cache.values()) {
+        try {
+          const invites = await guild.invites.fetch();
+          const inviteMap = new Map();
+
+          for (const [code, invite] of invites) {
+            inviteMap.set(code, { uses: invite.uses });
+          }
+
+          client.inviteCache.set(guild.id, inviteMap);
+          console.log(`${EMOJIS.SUCCESS} Cache de invitaciones inicializado para ${guild.name} (${invites.size} invitaciones)`);
+        } catch (error) {
+          // Si no tenemos permisos, ignorar silenciosamente
+          if (error.code !== 50013) {
+            console.log(`${EMOJIS.WARNING} No se pudo cachear invitaciones para ${guild.name}: ${error.message}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`${EMOJIS.ERROR} Error inicializando cache de invitaciones:`, error.message);
+    }
+
     console.log(`\n${EMOJIS.FLAG} Código Bushido activado. El dojo está listo.\n`);
   }
 };
