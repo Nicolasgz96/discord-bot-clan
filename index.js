@@ -1639,10 +1639,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Si es un torneo de duelos, crear bracket y panel de control
       if (event.type === 'duel_tournament' && event.metadata.bracket) {
+        const bracket = event.metadata.bracket;
+        const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
+
+        if (firstRoundMatches.length > 0) {
+          // Anunciar combates de primera ronda
+          await interaction.channel.send({
+            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n**Combates de la primera ronda:**`
+          });
+
+          // Anunciar cada combate de la primera ronda con embed
+          for (const match of firstRoundMatches) {
+            const p1Data = dataManager.getUser(match.player1, guildId);
+            const p2Data = dataManager.getUser(match.player2, guildId);
+
+            const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client, guildId);
+            await interaction.channel.send({ embeds: [matchEmbed] });
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+
         // Crear mensaje del bracket (que se actualiza automáticamente)
         try {
           const bracketMessage = await interaction.channel.send({
-            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n📊 **Bracket del Torneo:**`
+            content: `📊 **Bracket del Torneo:**\n_Actualizándose automáticamente..._`
           });
 
           event.metadata.bracketMessageId = bracketMessage.id;
