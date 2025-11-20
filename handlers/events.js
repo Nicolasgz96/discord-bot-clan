@@ -404,7 +404,7 @@ module.exports = {
           const { ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 
           const modal = new ModalBuilder()
-            .setCustomId(`building_submit_description:${event.id}:${messageId}:${interaction.channel.id}`)
+            .setCustomId(`bld_desc:${event.id}:${messageId}:${interaction.channel.id}`)
             .setTitle(`Descripción - ${event.name}`);
 
           const descriptionInput = new TextInputBuilder()

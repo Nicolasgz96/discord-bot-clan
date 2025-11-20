@@ -12,7 +12,7 @@ module.exports = {
     if (!interaction.isModalSubmit()) return;
 
     // ========== MODAL: Envío de construcción ==========
-    if (interaction.customId.startsWith('building_submit_description:')) {
+    if (interaction.customId.startsWith('bld_desc:')) {
       try {
         const [, eventId, messageId, channelId] = interaction.customId.split(':');
         const description = interaction.fields.getTextInputValue('description') || 'Sin descripción';
