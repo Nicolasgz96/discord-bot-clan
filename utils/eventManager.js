@@ -693,21 +693,23 @@ class EventManager {
       .setDescription('Dos guerreros se enfrentan en batalla')
       .addFields(
         {
-          name: `${EMOJIS.KATANA || '⚔️'} ${p1Name}`,
+          name: `⚔️ Jugador 1`,
           value:
+            `**Nombre:** ${p1Name}\n` +
             `**Rango:** ${p1Data?.rank || 'Ronin'}\n` +
             `**Honor:** ${p1Data?.honor || 0}\n` +
             `**Bio:** *"${p1Bio}"*`,
           inline: true
         },
         {
-          name: `${EMOJIS.VS || '⚡'}`,
+          name: '⚡',
           value: '**VS**',
           inline: true
         },
         {
-          name: `${EMOJIS.KATANA || '⚔️'} ${p2Name}`,
+          name: `⚔️ Jugador 2`,
           value:
+            `**Nombre:** ${p2Name}\n` +
             `**Rango:** ${p2Data?.rank || 'Ronin'}\n` +
             `**Honor:** ${p2Data?.honor || 0}\n` +
             `**Bio:** *"${p2Bio}"*`,
@@ -716,16 +718,20 @@ class EventManager {
       )
       .setTimestamp();
 
-    // MEJORA 1: Avatares en las esquinas (limitación de Discord: tamaños diferentes)
-    // Avatar P1 en thumbnail (esquina superior derecha) - MÁS GRANDE
+    // Avatar pequeño del Jugador 1 en author (esquina superior izquierda)
     if (p1Avatar) {
-      embed.setThumbnail(p1Avatar);
+      embed.setAuthor({
+        name: p1Name,
+        iconURL: p1Avatar
+      });
     }
 
-    // Avatar P2 en image (abajo, centrado) - GRANDE
-    // Usamos setImage para el segundo avatar para que sea visible y grande
+    // Avatar pequeño del Jugador 2 en footer (abajo)
     if (p2Avatar) {
-      embed.setImage(p2Avatar);
+      embed.setFooter({
+        text: p2Name,
+        iconURL: p2Avatar
+      });
     }
 
     return embed;
@@ -761,8 +767,10 @@ class EventManager {
       return null;
     }
 
-    // Obtener guild para displayNames
-    const guild = client.guilds.cache.first();
+    // Obtener guild correcto para displayNames
+    const guild = client.guilds.cache.get(event.guildId);
+    console.log(`🔍 [TournamentControl] Servidor: ${event.guildId} - ${guild ? `✅ ${guild.name}` : '❌ NO ENCONTRADO'}`);
+
     const member1 = guild ? await guild.members.fetch(currentMatch.player1).catch(() => null) : null;
     const member2 = guild ? await guild.members.fetch(currentMatch.player2).catch(() => null) : null;
     const user1 = await client.users.fetch(currentMatch.player1).catch(() => null);
@@ -771,6 +779,8 @@ class EventManager {
     // MEJORA 4: Usar displayName en lugar de username
     const p1Name = member1 ? member1.displayName : (user1 ? user1.username : currentMatch.player1);
     const p2Name = member2 ? member2.displayName : (user2 ? user2.username : currentMatch.player2);
+
+    console.log(`🏷️ [TournamentControl] P1: "${p1Name}" (displayName: ${member1?.displayName || 'N/A'}), P2: "${p2Name}" (displayName: ${member2?.displayName || 'N/A'})`);
 
     const embed = new EmbedBuilder()
       .setColor(COLORS.PRIMARY)
