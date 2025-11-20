@@ -31,6 +31,16 @@ module.exports = {
 
     if (!isEventInteraction) return;
 
+    // CRITICAL: Wait a moment to let collectors in index.js handle it first
+    // Collectors are created with the command and should have priority
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Verificar si la interacción ya fue manejada (por collectors en index.js)
+    // Los collectors tienen prioridad, este handler es un fallback
+    if (interaction.replied || interaction.deferred) {
+      return;
+    }
+
     // Importar eventManager dinámicamente para cada interacción
     const { getEventManager, EVENT_STATUS } = require('../utils/eventManager');
     const eventManager = getEventManager();
@@ -39,11 +49,6 @@ module.exports = {
     const guildId = interaction.guild.id;
 
     try {
-      // Verificar si la interacción ya fue manejada (por collectors en index.js)
-      // Los collectors tienen prioridad, este handler es un fallback
-      if (interaction.replied || interaction.deferred) {
-        return;
-      }
 
       // ========== Manejo de selección para unirse a evento ==========
       if (interaction.customId === 'event_join_select' && interaction.isStringSelectMenu()) {
