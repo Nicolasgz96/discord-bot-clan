@@ -870,8 +870,8 @@ const commands = [
         .addStringOption(option =>
           option
             .setName('evento')
-            .setDescription('Nombre o ID del evento')
-            .setRequired(true)
+            .setDescription('Nombre o ID del evento (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
@@ -923,10 +923,10 @@ const commands = [
             .setDescription('ID del evento')
             .setRequired(true)
         )
-        .addStringOption(option =>
+        .addAttachmentOption(option =>
           option
-            .setName('imagen_url')
-            .setDescription('URL de la imagen de tu construcción')
+            .setName('imagen')
+            .setDescription('Imagen de tu construcción (arrastra y suelta)')
             .setRequired(true)
         )
         .addStringOption(option =>
@@ -950,6 +950,25 @@ const commands = [
           option
             .setName('usuario')
             .setDescription('Usuario cuya construcción quieres votar (opcional con menú)')
+            .setRequired(false)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('test')
+        .setDescription('🧪 Crear evento de prueba con usuarios ficticios (Solo Administradores)')
+        .addIntegerOption(option =>
+          option
+            .setName('participantes')
+            .setDescription('Número de participantes ficticios (3-16)')
+            .setRequired(false)
+            .setMinValue(3)
+            .setMaxValue(16)
+        )
+        .addStringOption(option =>
+          option
+            .setName('nombre')
+            .setDescription('Nombre del torneo de prueba')
             .setRequired(false)
         )
     ),

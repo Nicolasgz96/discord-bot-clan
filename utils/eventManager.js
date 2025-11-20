@@ -997,7 +997,7 @@ class EventManager {
     bracketText += headerLine + '\n';
     bracketText += '─'.repeat(Math.min(headerLine.length, 50)) + '\n\n';
 
-    // Generar el árbol visual
+    // Generar el árbol visual - Ronda 1 (Cuartos/Octavos)
     const round1Matches = roundsData[1] || [];
     for (let i = 0; i < round1Matches.length; i++) {
       const match = round1Matches[i];
@@ -1007,20 +1007,35 @@ class EventManager {
       const p1Mark = match.winner === match.player1 ? '✅' : (match.winner ? '❌' : '⏳');
       const p2Mark = match.winner === match.player2 ? '✅' : (match.winner ? '❌' : '⏳');
 
-      // Primera línea del match
       bracketText += `${p1Name} ${p1Mark} ─╮\n`;
 
-      // Conectar a siguiente ronda
-      if (match.winner) {
-        const nextRound = round1Matches.length > 1 ? 2 : currentRound;
+      // Conectar a siguiente ronda (semifinales)
+      if (match.winner && roundsData[2]) {
         const winnerName = (playerNames[match.winner] || 'Ganador').substring(0, 8).padEnd(8);
-        const nextMatch = roundsData[nextRound]?.find(m => m.player1 === match.winner || m.player2 === match.winner);
+        const semiMatch = roundsData[2].find(m => m.player1 === match.winner || m.player2 === match.winner);
+        const semiMark = semiMatch?.winner === match.winner ? '✅' : (semiMatch?.winner ? '❌' : '⏳');
 
         if (i % 2 === 1 || round1Matches.length === 1) {
-          const nextMark = nextMatch?.winner === match.winner ? '✅' : (nextMatch?.winner ? '❌' : '⏳');
-          bracketText += `            ├─→ ${winnerName} ${nextMark} ─╮\n`;
+          // Par de combates completo - conectar a semifinal
+          bracketText += `            ├─→ ${winnerName} ${semiMark}`;
+
+          // Si hay final, conectar desde semifinal
+          if (roundsData[3] && semiMatch?.winner) {
+            const finalMatch = roundsData[3].find(m => m.player1 === semiMatch.winner || m.player2 === semiMatch.winner);
+            const finalMark = finalMatch?.winner === semiMatch.winner ? '✅' : (finalMatch?.winner ? '❌' : '⏳');
+            const semiWinnerName = (playerNames[semiMatch.winner] || 'Finalista').substring(0, 9).padEnd(9);
+
+            if (i === 1 || (i === round1Matches.length - 1 && round1Matches.length <= 2)) {
+              bracketText += ` ─╮\n`;
+              bracketText += `                                        ├─→ ${semiWinnerName} ${finalMark}\n`;
+            } else {
+              bracketText += ` ─╮\n`;
+            }
+          } else {
+            bracketText += ` ─╮\n`;
+          }
         } else {
-          bracketText += `            ├─→ ${winnerName} ⏳\n`;
+          bracketText += `            ├─→ ${winnerName} ${semiMark}\n`;
         }
       } else {
         bracketText += `            ├─→\n`;
@@ -1028,21 +1043,23 @@ class EventManager {
 
       bracketText += `${p2Name} ${p2Mark} ─╯\n`;
 
-      // Espaciado entre grupos
       if (i < round1Matches.length - 1 && i % 2 === 1) {
         bracketText += '\n';
       }
     }
 
-    // Mostrar campeón si existe
-    if (event.status === 'completed' && event.results) {
-      const champion = Object.keys(event.results).find(id => event.results[id].rank === 1);
-      if (champion) {
-        const champName = playerNames[champion] || 'Campeón';
-        bracketText += `\n                                          ├─→ 👑 ${champName}\n`;
+    // Mostrar campeón si todos los combates están terminados
+    const allMatchesCompleted = bracket.filter(m => m.player2).every(m => m.winner);
+    if (allMatchesCompleted) {
+      const finalMatch = bracket.find(m => m.round === currentRound && m.winner);
+      if (finalMatch && finalMatch.winner) {
+        const champName = (playerNames[finalMatch.winner] || 'Campeón').substring(0, 10).padEnd(10);
+        bracketText += `\n                                                            ├─→ 👑 ${champName}\n`;
+      } else {
+        bracketText += `\n                                                            ├─→ 👑 ???\n`;
       }
     } else {
-      bracketText += `\n                                          ├─→ 👑 ???\n`;
+      bracketText += `\n                                                            ├─→ 👑 ???\n`;
     }
 
     bracketText += '\n╚═════════════════════════════════════════╝\n';
@@ -1159,40 +1176,53 @@ class EventManager {
         });
       }
 
-      // Agregar próximo combate
+      // Verificar si todos los combates están terminados
+      const allMatchesCompleted = bracket.filter(m => m.player2).every(m => m.winner);
+
+      // Agregar combate actual o mostrar ganador
       const pendingMatches = bracket.filter(m => m.round === currentRound && !m.winner && m.player2);
       if (pendingMatches.length > 0) {
         const nextMatch = pendingMatches[0];
         const p1Name = await this.getDisplayName(client, guildId, nextMatch.player1);
         const p2Name = await this.getDisplayName(client, guildId, nextMatch.player2);
         embed.addFields({
-          name: '⚡ Próximo Combate',
+          name: '⚔️ Combate Actual',
           value: `**${p1Name}** 🆚 **${p2Name}**`,
           inline: false
         });
-      } else if (event.status === 'completed' && event.results) {
-        // Mostrar podio
-        const champion = Object.keys(event.results).find(id => event.results[id].rank === 1);
-        const runnerUp = Object.keys(event.results).find(id => event.results[id].rank === 2);
-        const thirdPlace = Object.keys(event.results).find(id => event.results[id].rank === 3);
+      } else if (allMatchesCompleted) {
+        // Todos los combates terminados - mostrar ganador
+        const finalMatch = bracket.find(m => m.round === currentRound && m.winner);
+        if (finalMatch && finalMatch.winner) {
+          const championName = await this.getDisplayName(client, guildId, finalMatch.winner);
+          const runnerUpId = finalMatch.player1 === finalMatch.winner ? finalMatch.player2 : finalMatch.player1;
+          const runnerUpName = await this.getDisplayName(client, guildId, runnerUpId);
 
-        let podiumText = '';
-        if (champion) {
-          const champName = await this.getDisplayName(client, guildId, champion);
-          podiumText += `🥇 **${champName}**\n`;
-        }
-        if (runnerUp) {
-          const runnerName = await this.getDisplayName(client, guildId, runnerUp);
-          podiumText += `🥈 **${runnerName}**\n`;
-        }
-        if (thirdPlace) {
-          const thirdName = await this.getDisplayName(client, guildId, thirdPlace);
-          podiumText += `🥉 **${thirdName}**\n`;
-        }
+          // Encontrar tercer puesto (perdedor de semifinal que no llegó a la final)
+          let podiumText = `🥇 **Campeón:** ${championName}\n🥈 **Subcampeón:** ${runnerUpName}`;
 
-        if (podiumText) {
+          if (currentRound > 1) {
+            // Buscar semifinales (ronda anterior)
+            const semiFinalsRound = currentRound - 1;
+            const semiFinals = bracket.filter(m => m.round === semiFinalsRound && m.winner);
+
+            // Encontrar los perdedores de semifinales (excluir al subcampeón)
+            const thirdPlaceCandidates = [];
+            for (const match of semiFinals) {
+              const loserId = match.player1 === match.winner ? match.player2 : match.player1;
+              if (loserId !== runnerUpId) {
+                thirdPlaceCandidates.push(loserId);
+              }
+            }
+
+            if (thirdPlaceCandidates.length > 0) {
+              const thirdPlaceName = await this.getDisplayName(client, guildId, thirdPlaceCandidates[0]);
+              podiumText += `\n🥉 **Tercer Puesto:** ${thirdPlaceName}`;
+            }
+          }
+
           embed.addFields({
-            name: '👑 Podio Final',
+            name: '👑 ¡Torneo Completado!',
             value: podiumText,
             inline: false
           });
@@ -1422,43 +1452,49 @@ class EventManager {
     const EMOJIS = require('../src/config/emojis');
     const COLORS = require('../src/config/colors');
 
-    // Obtener usuarios de Discord
-    const player1 = await client.users.fetch(match.player1).catch(() => null);
-    const player2 = await client.users.fetch(match.player2).catch(() => null);
+    // Verificar si son usuarios ficticios (de prueba)
+    const isTestUser1 = match.player1.startsWith('test_');
+    const isTestUser2 = match.player2.startsWith('test_');
+
+    // Obtener usuarios de Discord (solo si NO son ficticios)
+    const player1 = !isTestUser1 ? await client.users.fetch(match.player1).catch(() => null) : null;
+    const player2 = !isTestUser2 ? await client.users.fetch(match.player2).catch(() => null) : null;
 
     // Obtener guild correcto usando el guildId proporcionado
     let guild = null;
-    if (guildId) {
+    if (guildId && (!isTestUser1 || !isTestUser2)) {
       guild = client.guilds.cache.get(guildId);
       console.log(`🔍 Buscando servidor con ID: ${guildId} - ${guild ? `✅ Encontrado: ${guild.name}` : '❌ NO ENCONTRADO'}`);
-    } else {
+    } else if (!isTestUser1 || !isTestUser2) {
       guild = client.guilds.cache.first();
       console.log(`⚠️ No se proporcionó guildId, usando primer servidor: ${guild ? guild.name : 'ninguno'}`);
     }
 
-    if (!guild) {
+    if (!guild && (!isTestUser1 || !isTestUser2)) {
       const availableGuilds = Array.from(client.guilds.cache.entries()).map(([id, g]) => `${id} (${g.name})`);
       console.log(`❌ ERROR: No se pudo obtener el servidor. Servidores en cache: ${availableGuilds.join(', ')}`);
     }
 
-    const member1 = guild ? await guild.members.fetch(match.player1).catch((e) => {
+    const member1 = (!isTestUser1 && guild) ? await guild.members.fetch(match.player1).catch((e) => {
       console.log(`⚠️ No se pudo obtener member1 (${match.player1}): ${e.message}`);
       return null;
     }) : null;
-    const member2 = guild ? await guild.members.fetch(match.player2).catch((e) => {
+    const member2 = (!isTestUser2 && guild) ? await guild.members.fetch(match.player2).catch((e) => {
       console.log(`⚠️ No se pudo obtener member2 (${match.player2}): ${e.message}`);
       return null;
     }) : null;
 
-    // MEJORA 4: Usar displayName (nick del servidor) si está disponible
-    const p1Name = member1 ? member1.displayName : (player1 ? player1.username : match.player1);
-    const p2Name = member2 ? member2.displayName : (player2 ? player2.username : match.player2);
+    // Obtener nombres (usar await getDisplayName para manejar usuarios ficticios)
+    const p1Name = isTestUser1 ? await this.getDisplayName(client, guildId, match.player1) :
+                   (member1 ? member1.displayName : (player1 ? player1.username : match.player1));
+    const p2Name = isTestUser2 ? await this.getDisplayName(client, guildId, match.player2) :
+                   (member2 ? member2.displayName : (player2 ? player2.username : match.player2));
 
-    console.log(`🏷️ Nombres finales - P1: "${p1Name}" (displayName: ${member1?.displayName || 'N/A'}), P2: "${p2Name}" (displayName: ${member2?.displayName || 'N/A'})`);
+    console.log(`🏷️ Nombres finales - P1: "${p1Name}" (test: ${isTestUser1}), P2: "${p2Name}" (test: ${isTestUser2})`);
 
-    // Obtener avatares con tamaño consistente más grande
-    const p1Avatar = player1 ? player1.displayAvatarURL({ size: 256 }) : null;
-    const p2Avatar = player2 ? player2.displayAvatarURL({ size: 256 }) : null;
+    // Obtener avatares (null para usuarios ficticios)
+    const p1Avatar = (!isTestUser1 && player1) ? player1.displayAvatarURL({ size: 256 }) : null;
+    const p2Avatar = (!isTestUser2 && player2) ? player2.displayAvatarURL({ size: 256 }) : null;
 
     // Obtener bio desde customization
     const p1Bio = p1Data?.customization?.bio || 'Un guerrero misterioso...';
@@ -1679,6 +1715,14 @@ class EventManager {
    */
   async getDisplayName(client, guildId, userId) {
     try {
+      // Manejar usuarios ficticios (de prueba)
+      if (userId.startsWith('test_')) {
+        // Extraer el número del ID: test_timestamp_N
+        const parts = userId.split('_');
+        const userNumber = parts[parts.length - 1];
+        return `TestUser_${userNumber}`;
+      }
+
       const guild = client.guilds.cache.get(guildId);
       if (!guild) {
         const user = await client.users.fetch(userId).catch(() => null);

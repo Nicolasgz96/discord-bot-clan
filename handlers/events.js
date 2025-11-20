@@ -22,9 +22,13 @@ module.exports = {
       'event_view_select',
       'event_finalize_select',
       'event_cancel_select',
-      'event_vote_select_event',
-      'tournament_winner_select'
+      'event_vote_select_event'
     ];
+
+    // Excluir interacciones que ya se manejan completamente en index.js
+    if (interaction.customId === 'event_start_select' || interaction.customId === 'tournament_winner_select') {
+      return;
+    }
 
     const isEventInteraction = eventInteractionIds.includes(interaction.customId) ||
                                interaction.customId.startsWith('event_vote_select_user:') ||
@@ -211,153 +215,8 @@ module.exports = {
         await interaction.update({ embeds: [detailEmbed], components: [] });
       }
 
-      // ========== Manejo de selección de ganador de torneo ==========
-      else if (interaction.customId === 'tournament_winner_select' && interaction.isStringSelectMenu()) {
-        try {
-          // Obtener torneo activo para este mensaje
-          const activeTournaments = eventManager.getGuildEvents(guildId).filter(e =>
-            e.type === 'duel_tournament' &&
-            e.status === EVENT_STATUS.ACTIVE &&
-            e.metadata.controlMessageId === interaction.message.id
-          );
-
-          if (activeTournaments.length === 0) {
-            return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el torneo activo para este mensaje.`,
-              flags: MessageFlags.Ephemeral
-            });
-          }
-
-          const tournament = activeTournaments[0];
-
-          // Verificar que el usuario es admin o creador del evento
-          const isAdmin = interaction.member.permissions.has(require('discord.js').PermissionFlagsBits.Administrator);
-          const isCreator = tournament.creatorId === userId;
-
-          if (!isAdmin && !isCreator) {
-            return interaction.reply({
-              content: `${EMOJIS.ERROR} Solo el creador del evento o administradores pueden registrar resultados.`,
-              flags: MessageFlags.Ephemeral
-            });
-          }
-
-          await interaction.deferUpdate();
-
-          const selectedWinner = interaction.values[0];
-
-          // Obtener el combate actual para encontrar al perdedor
-          const bracket = tournament.metadata.bracket;
-          const currentRound = Math.max(...bracket.map(m => m.round));
-          const currentMatch = bracket.find(m =>
-            m.round === currentRound &&
-            !m.winner &&
-            m.player2 &&
-            (m.player1 === selectedWinner || m.player2 === selectedWinner)
-          );
-
-          if (!currentMatch) {
-            return interaction.followUp({
-              content: `${EMOJIS.ERROR} No se pudo encontrar el combate correspondiente.`,
-              flags: MessageFlags.Ephemeral
-            });
-          }
-
-          const loser = currentMatch.player1 === selectedWinner ? currentMatch.player2 : currentMatch.player1;
-
-          // Registrar ganador usando la nueva función
-          eventManager.recordTournamentWinner(tournament.id, selectedWinner, loser);
-
-          // ====== ANTI-SPAM: Actualizar bracket en lugar de crear mensajes nuevos ======
-          // Actualizar el mensaje principal del bracket con el nuevo estado
-          await eventManager.updateBracketMessage(tournament.id, interaction.channel, client, dataManager, guildId);
-          // Obtener displayNames para los mensajes
-          const winnerName = await eventManager.getDisplayName(client, guildId, selectedWinner);
-          const loserName = await eventManager.getDisplayName(client, guildId, loser);
-
-          const resultEmbed = new EmbedBuilder()
-            .setColor(COLORS.SUCCESS)
-            .setTitle('🏆 Último Resultado del Torneo')
-            .setDescription(
-              `**${winnerName}** ha derrotado a **${loserName}**\n\n` +
-              `✅ ${winnerName} avanza a la siguiente ronda!`
-            )
-            .setFooter({ text: `Torneo: ${tournament.name}` })
-            .setTimestamp();
-
-          // Siempre crear NUEVO mensaje de resultado (no editar el viejo)
-          // Esto asegura que el resultado sea visible al final del canal
-          const announcementMessage = await interaction.channel.send({ embeds: [resultEmbed] });
-          tournament.metadata.announcementMessageId = announcementMessage.id;
-          eventManager.saveEvents();
-          console.log(`📝 Mensaje de resultado enviado: ${announcementMessage.id}`);
-
-          // Verificar si se avanzó a nueva ronda
-          const updatedTournament = eventManager.getEvent(tournament.id);
-          const updatedBracket = updatedTournament.metadata.bracket;
-          const updatedCurrentRound = Math.max(...updatedBracket.map(m => m.round));
-
-          // Si la ronda cambió, anunciar nueva ronda
-          if (updatedCurrentRound > currentRound) {
-            const newRoundMatches = updatedBracket.filter(m => m.round === updatedCurrentRound && !m.winner && m.player2);
-
-            if (newRoundMatches.length > 0) {
-              await interaction.channel.send({
-                content: `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}** del torneo **${updatedTournament.name}**\n\n**Combates de esta ronda:**`
-              });
-
-              // Anunciar cada combate con los embeds mejorados
-              for (const match of newRoundMatches) {
-                const p1Data = dataManager.getUser(match.player1, guildId);
-                const p2Data = dataManager.getUser(match.player2, guildId);
-                const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, client, guildId);
-
-                await interaction.channel.send({ embeds: [matchEmbed] });
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              }
-            }
-          }
-
-          // Actualizar mensaje de control con el siguiente combate
-          const newControlData = await eventManager.generateTournamentControlMessage(tournament.id, client);
-
-          if (newControlData) {
-            console.log(`🎮 Hay más combates pendientes, enviando nuevo panel de control...`);
-            // Enviar nuevo panel de control como followUp efímero
-            // (no podemos editar el mensaje original porque es ephemeral de otra interacción)
-            const newControlMessage = await interaction.followUp({
-              content: `🏆 **Panel de Control del Torneo**\n\nSelecciona el ganador del siguiente combate:`,
-              embeds: [newControlData.embed],
-              components: newControlData.components,
-              ephemeral: true,
-              fetchReply: true
-            });
-
-            // Actualizar el ID del mensaje de control para el próximo clic
-            const updatedTournament = eventManager.getEvent(tournament.id);
-            if (updatedTournament) {
-              updatedTournament.metadata.controlMessageId = newControlMessage.id;
-              eventManager.saveEvents();
-              console.log(`🔄 Panel de control actualizado: ${newControlMessage.id}`);
-            }
-          } else {
-            // No hay más combates, torneo terminado
-            console.log(`🏁 Torneo completado, no hay más combates. Enviando mensaje final...`);
-            await interaction.followUp({
-              content: `✅ **¡Torneo completado!** No hay más combates pendientes.\n\nUsa \`/evento finalizar evento:${tournament.name}\` para otorgar premios.`,
-              ephemeral: true
-            });
-            console.log(`✅ Mensaje de torneo completado enviado`);
-          }
-
-          console.log(`✅ Resultado registrado: ${selectedWinner} ganó en torneo ${tournament.id}`);
-        } catch (error) {
-          console.error('Error manejando selección del torneo:', error);
-          await interaction.followUp({
-            content: `${EMOJIS.ERROR} Error al procesar la selección: ${error.message}`,
-            flags: MessageFlags.Ephemeral
-          }).catch(() => {});
-        }
-      }
+      // NOTA: tournament_winner_select se maneja completamente en index.js
+      // (excluido en línea 29-30 arriba)
 
       // ========== Manejo de envío de construcción (selector de evento) ==========
       else if (interaction.customId.startsWith('building_submit_event:') && interaction.isStringSelectMenu()) {

@@ -1534,6 +1534,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const guildId = interaction.guild.id;
 
     try {
+      const { getEventManager } = require('./utils/eventManager');
+      const eventManager = getEventManager();
+
       // Obtener torneo activo
       const activeTournaments = eventManager.getGuildEvents(guildId).filter(e =>
         e.type === 'duel_tournament' &&
@@ -1587,51 +1590,96 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // Registrar ganador
       eventManager.recordTournamentWinner(tournament.id, selectedWinner, loser);
 
-      // Anunciar resultado en el canal
-      await interaction.channel.send({
-        content: `🏆 **Resultado:** <@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
-      });
-
       // Actualizar el mensaje del bracket automáticamente (ANTI-SPAM)
       await eventManager.updateBracketMessage(tournament.id, interaction.channel, interaction.client, dataManager, guildId);
 
-      // Verificar si se avanzó a nueva ronda
+      // Actualizar mensaje del combate actual con el siguiente combate pendiente
       const updatedTournament = eventManager.getEvent(tournament.id);
       const updatedBracket = updatedTournament.metadata.bracket;
+      const nextPendingMatch = updatedBracket.find(m => !m.winner && m.player2);
+
+      // Verificar si se avanzó a nueva ronda
       const updatedCurrentRound = Math.max(...updatedBracket.map(m => m.round));
+      const isNewRound = updatedCurrentRound > currentRound;
 
-      // Si la ronda cambió, anunciar nueva ronda
-      if (updatedCurrentRound > currentRound) {
-        const newRoundMatches = updatedBracket.filter(m => m.round === updatedCurrentRound && !m.winner && m.player2);
+      if (nextPendingMatch && updatedTournament.metadata.currentMatchMessageId) {
+        try {
+          const currentMatchMessage = await interaction.channel.messages.fetch(updatedTournament.metadata.currentMatchMessageId);
+          const p1Data = dataManager.getUser(nextPendingMatch.player1, guildId);
+          const p2Data = dataManager.getUser(nextPendingMatch.player2, guildId);
+          const matchEmbed = await eventManager.generateMatchVSEmbed(nextPendingMatch, p1Data, p2Data, interaction.client, guildId);
 
-        if (newRoundMatches.length > 0) {
-          await interaction.channel.send({
-            content: `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}** del torneo **${updatedTournament.name}**\n\n**Combates de esta ronda:**`
-          });
+          // Construir content con anuncio de nueva ronda si aplica
+          let content = `⚔️ **TORNEO EN CURSO** ⚔️\n**${updatedTournament.name}**\n`;
 
-          // Anunciar cada combate con embed visual
-          for (const match of newRoundMatches) {
-            const p1Data = dataManager.getUser(match.player1, guildId);
-            const p2Data = dataManager.getUser(match.player2, guildId);
-            const matchEmbed = eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client);
-
-            await interaction.channel.send({ embeds: [matchEmbed] });
-            await new Promise(resolve => setTimeout(resolve, 1000));
+          if (isNewRound) {
+            content += `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}**\n`;
           }
 
-          // Actualizar el bracket después de anunciar la nueva ronda (ANTI-SPAM)
-          await eventManager.updateBracketMessage(tournament.id, interaction.channel, interaction.client, dataManager, guildId);
+          content += `\n**Combate Actual:**`;
+
+          await currentMatchMessage.edit({
+            content: content,
+            embeds: [matchEmbed]
+          });
+        } catch (err) {
+          console.error(`❌ Error actualizando mensaje de combate actual:`, err.message);
+        }
+      } else if (!nextPendingMatch && updatedTournament.metadata.currentMatchMessageId) {
+        // No hay más combates - mostrar finalización
+        try {
+          const currentMatchMessage = await interaction.channel.messages.fetch(updatedTournament.metadata.currentMatchMessageId);
+          const finalMatch = updatedBracket.find(m => m.round === Math.max(...updatedBracket.map(m2 => m2.round)) && m.winner);
+
+          if (finalMatch) {
+            const championName = await eventManager.getDisplayName(interaction.client, guildId, finalMatch.winner);
+            const embed = new EmbedBuilder()
+              .setColor(COLORS.SUCCESS)
+              .setTitle('👑 ¡TORNEO FINALIZADO!')
+              .setDescription(`**Campeón:** ${championName}\n\n¡Felicidades al ganador!`)
+              .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+              .setTimestamp();
+
+            await currentMatchMessage.edit({
+              content: `⚔️ **TORNEO COMPLETADO** ⚔️\n**${updatedTournament.name}**`,
+              embeds: [embed]
+            });
+          }
+        } catch (err) {
+          console.error(`❌ Error actualizando mensaje final:`, err.message);
         }
       }
 
       // Actualizar mensaje de control con el siguiente combate
-      const newControlData = eventManager.generateTournamentControlMessage(tournament.id, interaction.client);
+      const newControlData = await eventManager.generateTournamentControlMessage(tournament.id, interaction.client);
 
       if (newControlData) {
-        await interaction.message.edit({
+        console.log(`🎮 Hay más combates pendientes, enviando nuevo panel de control...`);
+        // Enviar nuevo panel de control como followUp efímero
+        // (no podemos editar el mensaje original porque es ephemeral de otra interacción)
+        const newControlMessage = await interaction.followUp({
+          content: `🏆 **Panel de Control del Torneo**\n\nSelecciona el ganador del siguiente combate:`,
           embeds: [newControlData.embed],
-          components: newControlData.components
+          components: newControlData.components,
+          ephemeral: true,
+          fetchReply: true
         });
+
+        // Actualizar el ID del mensaje de control para el próximo clic
+        const updatedTournament = eventManager.getEvent(tournament.id);
+        if (updatedTournament) {
+          updatedTournament.metadata.controlMessageId = newControlMessage.id;
+          eventManager.saveEvents();
+          console.log(`🔄 Panel de control actualizado: ${newControlMessage.id}`);
+        }
+      } else {
+        // No hay más combates, torneo terminado
+        console.log(`🏁 Torneo completado, no hay más combates. Enviando mensaje final...`);
+        await interaction.followUp({
+          content: `✅ **¡Torneo completado!** No hay más combates pendientes.\n\nUsa \`/evento finalizar evento:${tournament.name}\` para otorgar premios.`,
+          ephemeral: true
+        });
+        console.log(`✅ Mensaje de torneo completado enviado`);
       }
 
       console.log(`✅ Resultado registrado: ${selectedWinner} ganó en torneo ${tournament.id}`);
@@ -1644,6 +1692,133 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     return; // Terminar aquí para evitar el procesamiento de comandos
+  }
+
+  // ========== HANDLER PARA DROPDOWN DE INICIAR EVENTO ==========
+  if (interaction.isStringSelectMenu() && interaction.customId === 'event_start_select') {
+    const userId = interaction.user.id;
+    const guildId = interaction.guild.id;
+
+    try {
+      // Verificar permisos de administrador
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.update({
+          content: `${EMOJIS.ERROR} Solo los administradores pueden iniciar eventos.`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      const selectedEventId = interaction.values[0];
+      const { getEventManager, EVENT_STATUS } = require('./utils/eventManager');
+      const eventManager = getEventManager();
+      const event = eventManager.getEvent(selectedEventId);
+
+      if (!event) {
+        return interaction.update({
+          content: `${EMOJIS.ERROR} El evento seleccionado ya no existe.`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      if (event.status !== EVENT_STATUS.PENDING) {
+        return interaction.update({
+          content: `${EMOJIS.ERROR} Este evento ya no está pendiente (Estado: ${event.status}).`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      // Iniciar el evento
+      eventManager.startEvent(event.id);
+
+      const embed = new EmbedBuilder()
+        .setColor(COLORS.SUCCESS)
+        .setTitle(`${event.emoji} ¡Evento Iniciado!`)
+        .setDescription(
+          `**${event.name}** ha comenzado.\n\n` +
+          `**Participantes:** ${event.participants.length}\n` +
+          `**Finaliza:** <t:${Math.floor(event.endTime / 1000)}:R>`
+        )
+        .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+        .setTimestamp();
+
+      await interaction.update({ embeds: [embed], components: [] });
+
+      // Si es un torneo de duelos, crear bracket y panel de control
+      if (event.type === 'duel_tournament' && event.metadata.bracket) {
+        const bracket = event.metadata.bracket;
+        const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
+
+        // Crear mensaje del combate actual (1 solo mensaje que se actualiza)
+        if (firstRoundMatches.length > 0) {
+          const firstMatch = firstRoundMatches[0];
+          const p1Data = dataManager.getUser(firstMatch.player1, guildId);
+          const p2Data = dataManager.getUser(firstMatch.player2, guildId);
+
+          const matchEmbed = await eventManager.generateMatchVSEmbed(firstMatch, p1Data, p2Data, interaction.client, guildId);
+
+          const currentMatchMessage = await interaction.channel.send({
+            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n**Combate Actual:**`,
+            embeds: [matchEmbed]
+          });
+
+          // Guardar ID del mensaje de combate actual para actualizarlo después
+          event.metadata.currentMatchMessageId = currentMatchMessage.id;
+          eventManager.saveEvents();
+        }
+
+        // Crear mensaje del bracket (que se actualiza automáticamente)
+        try {
+          const bracketMessage = await interaction.channel.send({
+            content: `📊 **Bracket del Torneo:**\n_Actualizándose automáticamente..._`
+          });
+
+          event.metadata.bracketMessageId = bracketMessage.id;
+          eventManager.saveEvents();
+
+          // Actualizar bracket inmediatamente con todos los datos
+          await eventManager.updateBracketMessage(event.id, interaction.channel, interaction.client, dataManager, guildId);
+        } catch (bracketError) {
+          console.error(`❌ Error creando bracket inicial del torneo:`, bracketError);
+        }
+
+        // Enviar panel de control (solo visible para el admin)
+        const controlData = await eventManager.generateTournamentControlMessage(event.id, interaction.client);
+
+        if (controlData) {
+          const controlMessage = await interaction.followUp({
+            content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
+            embeds: [controlData.embed],
+            components: controlData.components,
+            ephemeral: true,
+            fetchReply: true
+          });
+
+          // Guardar el ID del mensaje de control para referencia futura
+          event.metadata.controlMessageId = controlMessage.id;
+          eventManager.saveEvents();
+        }
+      }
+      // Para eventos que no son torneos, anunciar en el canal
+      else {
+        await interaction.channel.send({
+          content: `${event.emoji} **¡Evento Iniciado!**\n**${event.name}** ha comenzado con **${event.participants.length} participantes**.`
+        });
+      }
+
+      console.log(`✅ ${interaction.user.tag} inició evento desde dropdown: ${event.name}`);
+    } catch (error) {
+      console.error('Error manejando inicio de evento desde dropdown:', error);
+      await interaction.update({
+        content: `${EMOJIS.ERROR} Error al iniciar el evento: ${error.message}`,
+        embeds: [],
+        components: []
+      }).catch(() => {});
+    }
+
+    return; // Terminar aquí
   }
 
   if (!interaction.isChatInputCommand()) return;
@@ -6841,6 +7016,49 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         const eventoQuery = interaction.options.getString('evento');
 
+        // Si no se especifica evento, mostrar dropdown
+        if (!eventoQuery) {
+          const guildEvents = eventManager.getGuildEvents(guildId);
+          const pendingEvents = guildEvents.filter(e => e.status === EVENT_STATUS.PENDING);
+
+          if (pendingEvents.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay eventos pendientes para iniciar.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Crear opciones del dropdown
+          const options = pendingEvents.map(event =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(event.name.substring(0, 100))
+              .setDescription(`${event.emoji} ${event.participants.length}/${event.maxParticipants} participantes`.substring(0, 100))
+              .setValue(event.id)
+              .setEmoji(event.emoji)
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('event_start_select')
+            .setPlaceholder('▶️ Selecciona un evento para iniciar')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('▶️ Iniciar Evento')
+            .setDescription(`Selecciona el evento que deseas iniciar (${pendingEvents.length} disponibles):`)
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          return interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
         try {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
@@ -6877,51 +7095,46 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await interaction.reply({ embeds: [embed] });
 
-          // Si es un torneo de duelos, anunciar combates y enviar panel de control
+          // Si es un torneo de duelos, crear mensaje de combate actual y enviar panel de control
           if (event.type === 'duel_tournament' && event.metadata.bracket) {
             const bracket = event.metadata.bracket;
             const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
 
             if (firstRoundMatches.length > 0) {
-              await interaction.channel.send({
-                content: `\n🎊 **¡TORNEO INICIADO!** 🎊\n**${event.name}**\n\n**Combates de la primera ronda:**`
+              // Crear mensaje del combate actual (1 solo mensaje que se actualiza)
+              const firstMatch = firstRoundMatches[0];
+              const p1Data = dataManager.getUser(firstMatch.player1, guildId);
+              const p2Data = dataManager.getUser(firstMatch.player2, guildId);
+
+              const matchEmbed = await eventManager.generateMatchVSEmbed(firstMatch, p1Data, p2Data, client, guildId);
+
+              const currentMatchMessage = await interaction.channel.send({
+                content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n**Combate Actual:**`,
+                embeds: [matchEmbed]
               });
 
-              // Anunciar cada combate de la primera ronda
-              for (const match of firstRoundMatches) {
-                const p1Data = dataManager.getUser(match.player1, guildId);
-                const p2Data = dataManager.getUser(match.player2, guildId);
+              // Guardar ID del mensaje de combate actual para actualizarlo después
+              event.metadata.currentMatchMessageId = currentMatchMessage.id;
+              eventManager.saveEvents();
+            }
 
-                const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, client, guildId);
-                const matchMessage = await interaction.channel.send({ embeds: [matchEmbed] });
+            // Enviar mensaje de control (solo visible para el creador)
+            const controlData = await eventManager.generateTournamentControlMessage(event.id, client);
 
-                // Guardar ID del primer mensaje como announcementMessageId
-                if (!event.metadata.announcementMessageId) {
-                  event.metadata.announcementMessageId = matchMessage.id;
-                  eventManager.saveEvents();
-                }
+            if (controlData) {
+              const controlMessage = await interaction.followUp({
+                content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
+                embeds: [controlData.embed],
+                components: controlData.components,
+                ephemeral: true,
+                fetchReply: true
+              });
 
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              }
+              // Guardar ID del mensaje de control
+              event.metadata.controlMessageId = controlMessage.id;
+              eventManager.saveEvents();
 
-              // Enviar mensaje de control (solo visible para el creador)
-              const controlData = await eventManager.generateTournamentControlMessage(event.id, client);
-
-              if (controlData) {
-                const controlMessage = await interaction.followUp({
-                  content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
-                  embeds: [controlData.embed],
-                  components: controlData.components,
-                  ephemeral: true,
-                  fetchReply: true
-                });
-
-                // Guardar ID del mensaje de control
-                event.metadata.controlMessageId = controlMessage.id;
-                eventManager.saveEvents();
-
-                console.log(`✅ Mensaje de control creado: ${controlMessage.id} para torneo ${event.id}`);
-              }
+              console.log(`✅ Mensaje de control creado: ${controlMessage.id} para torneo ${event.id}`);
             }
           }
 
@@ -7445,6 +7658,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // ========== /evento enviar ==========
       else if (subcommand === 'enviar') {
+        const eventoId = interaction.options.getString('evento');
+        const imagenAttachment = interaction.options.getAttachment('imagen');
         const eventoQuery = interaction.options.getString('evento');
         const imagenUrl = interaction.options.getString('imagen_url');
         const descripcionBuild = interaction.options.getString('descripcion') || 'Sin descripción';
@@ -7469,6 +7684,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
           }
 
+          // Validar que el attachment sea una imagen
+          if (!imagenAttachment.contentType || !imagenAttachment.contentType.startsWith('image/')) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} El archivo debe ser una imagen (PNG, JPG, GIF, etc.)`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const imagenUrl = imagenAttachment.url;
+
+          eventManager.submitBuildingEntry(eventoId, userId, imagenUrl, descripcionBuild);
           console.log(`✅ ${interaction.user.tag} inició evento desde dropdown: ${eventoQuery}`);
 
           eventManager.submitBuildingEntry(event.id, userId, imagenUrl, descripcionBuild);
@@ -7786,6 +8012,126 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({
             content: `${EMOJIS.ERROR} ${error.message}`,
             flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // ========== /evento test ==========
+      else if (subcommand === 'test') {
+        // Solo admins pueden crear eventos de prueba
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} Solo los administradores pueden crear eventos de prueba.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        const numParticipants = interaction.options.getInteger('participantes') || 5;
+        const eventName = interaction.options.getString('nombre') || `Torneo de Prueba ${Date.now()}`;
+
+        try {
+          await interaction.deferReply();
+
+          // Crear usuarios ficticios con datos realistas
+          const testUsers = [];
+          const testUserIds = [];
+
+          for (let i = 1; i <= numParticipants; i++) {
+            const testUserId = `test_${Date.now()}_${i}`;
+            testUserIds.push(testUserId);
+
+            // Generar stats aleatorios pero realistas
+            const randomHonor = Math.floor(Math.random() * 5000) + 100;
+            const randomKoku = Math.floor(Math.random() * 10000) + 500;
+            const rank = CONSTANTS.calculateRank(randomHonor);
+
+            // Crear perfil de usuario ficticio en dataManager
+            const userData = {
+              honor: randomHonor,
+              koku: randomKoku,
+              rank: rank,
+              messages: Math.floor(Math.random() * 500),
+              voiceTime: Math.floor(Math.random() * 10000),
+              dailyStreak: Math.floor(Math.random() * 30),
+              lastDaily: 0,
+              clanId: null
+            };
+
+            // Guardar en dataManager (simulando usuario real)
+            dataManager.users[guildId] = dataManager.users[guildId] || {};
+            dataManager.users[guildId][testUserId] = userData;
+
+            testUsers.push({
+              id: testUserId,
+              name: `TestUser_${i}`,
+              honor: randomHonor,
+              koku: randomKoku,
+              rank: rank
+            });
+          }
+
+          // Guardar datos de usuarios ficticios
+          dataManager.dataModified.users = true;
+          await dataManager.saveAll();
+
+          // Crear evento de torneo con usuarios ficticios
+          const event = eventManager.createEvent(
+            guildId,
+            'duel_tournament',
+            eventName,
+            `🧪 Evento de prueba con ${numParticipants} participantes ficticios`,
+            userId,
+            {
+              duration: 2,
+              maxParticipants: numParticipants
+            }
+          );
+
+          // Añadir todos los usuarios ficticios al evento
+          for (const testUserId of testUserIds) {
+            eventManager.joinEvent(event.id, testUserId);
+          }
+
+          // Responder con información del evento
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle('🧪 Evento de Prueba Creado')
+            .setDescription(
+              `**${eventName}**\n\n` +
+              `Se ha creado un torneo de prueba con participantes ficticios.\n\n` +
+              `**ID del Evento:** \`${event.id}\`\n` +
+              `**Tipo:** ${event.emoji} Torneo de Duelos\n` +
+              `**Participantes:** ${numParticipants}`
+            )
+            .addFields(
+              {
+                name: '👥 Participantes Ficticios',
+                value: testUsers.map((u, idx) =>
+                  `${idx + 1}. **${u.name}** - ${EMOJIS[u.rank.toUpperCase()] || '🥷'} ${u.rank} (${u.honor} honor)`
+                ).join('\n').substring(0, 1024),
+                inline: false
+              },
+              {
+                name: '🎮 Siguiente Paso',
+                value: `Usa \`/evento iniciar evento:${event.id}\` para comenzar el torneo de prueba.`,
+                inline: false
+              },
+              {
+                name: '⚠️ Nota',
+                value: 'Los usuarios ficticios se comportan exactamente como usuarios reales. Puedes declarar ganadores desde el panel de control.',
+                inline: false
+              }
+            )
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          await interaction.editReply({ embeds: [embed] });
+
+          console.log(`🧪 ${interaction.user.tag} creó evento de prueba: ${eventName} con ${numParticipants} participantes`);
+        } catch (error) {
+          console.error('Error creando evento de prueba:', error);
+          await interaction.editReply({
+            content: `${EMOJIS.ERROR} Error al crear evento de prueba: ${error.message}`
           });
         }
       }
