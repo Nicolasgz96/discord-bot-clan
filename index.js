@@ -2037,8 +2037,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
       try {
         // Obtener el mensaje de respuesta después de editReply
         const replyMessage = await interaction.fetchReply();
+        let buttonInteraction;
         try {
-          const buttonInteraction = await replyMessage.awaitMessageComponent({ filter, time: 30000 });
+          buttonInteraction = await replyMessage.awaitMessageComponent({ filter, time: 30000 });
 
           if (buttonInteraction.customId === 'cancel_delete') {
             await buttonInteraction.update({ content: '❌ Operación cancelada.', components: [] });
