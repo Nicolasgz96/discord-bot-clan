@@ -732,13 +732,8 @@ class EventManager {
 
     if (!currentMatch) {
       // No hay más combates, torneo terminado
-      return {
-        embed: new EmbedBuilder()
-          .setColor(COLORS.SUCCESS)
-          .setTitle('🏆 Torneo Completado')
-          .setDescription('¡Todos los combates han finalizado!'),
-        components: []
-      };
+      console.log(`🏁 generateTournamentControlMessage: No hay combates pendientes, retornando null`);
+      return null;
     }
 
     // Obtener guild para displayNames

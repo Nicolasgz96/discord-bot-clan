@@ -278,28 +278,12 @@ module.exports = {
             .setFooter({ text: `Torneo: ${tournament.name}` })
             .setTimestamp();
 
-          // Actualizar o crear mensaje de anuncio
-          let announcementMessage;
-          if (tournament.metadata.announcementMessageId) {
-            try {
-              announcementMessage = await interaction.channel.messages.fetch(tournament.metadata.announcementMessageId);
-              await announcementMessage.edit({ embeds: [resultEmbed] });
-              console.log(`📝 Mensaje de resultado actualizado: ${announcementMessage.id}`);
-            } catch (error) {
-              // Si no se encuentra, crear nuevo
-              console.log(`⚠️ No se pudo editar mensaje de anuncio, creando nuevo: ${error.message}`);
-              announcementMessage = await interaction.channel.send({ embeds: [resultEmbed] });
-              tournament.metadata.announcementMessageId = announcementMessage.id;
-              eventManager.saveEvents();
-              console.log(`📝 Nuevo mensaje de resultado creado: ${announcementMessage.id}`);
-            }
-          } else {
-            // Crear nuevo mensaje de anuncio
-            announcementMessage = await interaction.channel.send({ embeds: [resultEmbed] });
-            tournament.metadata.announcementMessageId = announcementMessage.id;
-            eventManager.saveEvents();
-            console.log(`📝 Mensaje de resultado inicial creado: ${announcementMessage.id}`);
-          }
+          // Siempre crear NUEVO mensaje de resultado (no editar el viejo)
+          // Esto asegura que el resultado sea visible al final del canal
+          const announcementMessage = await interaction.channel.send({ embeds: [resultEmbed] });
+          tournament.metadata.announcementMessageId = announcementMessage.id;
+          eventManager.saveEvents();
+          console.log(`📝 Mensaje de resultado enviado: ${announcementMessage.id}`);
 
           // Verificar si se avanzó a nueva ronda
           const updatedTournament = eventManager.getEvent(tournament.id);
