@@ -5951,6 +5951,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // Create collector for event selection
           const collector = response.createMessageComponentCollector({
             componentType: ComponentType.StringSelect,
+            filter: (i) => i.user.id === userId, // Solo el usuario que ejecutó el comando puede interactuar
             time: 300000 // 5 minutos
           });
 
@@ -6005,10 +6006,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
               }
             } catch (error) {
               console.error(`❌ Error procesando selección de evento:`, error);
-              await i.reply({
-                content: `${EMOJIS.ERROR} Hubo un error al unirte al evento. Intenta de nuevo.`,
-                flags: MessageFlags.Ephemeral
-              });
+              // Verificar si la interacción ya fue respondida
+              if (i.replied || i.deferred) {
+                await i.followUp({
+                  content: `${EMOJIS.ERROR} Hubo un error al unirte al evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              } else {
+                await i.reply({
+                  content: `${EMOJIS.ERROR} Hubo un error al unirte al evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              }
             }
           });
 
@@ -6123,6 +6132,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // Create collector for event selection
           const collector = response.createMessageComponentCollector({
             componentType: ComponentType.StringSelect,
+            filter: (i) => i.user.id === userId, // Solo el usuario que ejecutó el comando puede interactuar
             time: 300000 // 5 minutos
           });
 
@@ -6163,10 +6173,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
               }
             } catch (error) {
               console.error(`❌ Error procesando salida de evento:`, error);
-              await i.reply({
-                content: `${EMOJIS.ERROR} Hubo un error al salir del evento. Intenta de nuevo.`,
-                flags: MessageFlags.Ephemeral
-              });
+              // Verificar si la interacción ya fue respondida
+              if (i.replied || i.deferred) {
+                await i.followUp({
+                  content: `${EMOJIS.ERROR} Hubo un error al salir del evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              } else {
+                await i.reply({
+                  content: `${EMOJIS.ERROR} Hubo un error al salir del evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              }
             }
           });
 
