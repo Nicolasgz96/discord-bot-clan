@@ -1034,15 +1034,18 @@ class EventManager {
       }
     }
 
-    // Mostrar campeón si existe
-    if (event.status === 'completed' && event.results) {
-      const champion = Object.keys(event.results).find(id => event.results[id].rank === 1);
-      if (champion) {
-        const champName = playerNames[champion] || 'Campeón';
-        bracketText += `\n                                          ├─→ 👑 ${champName}\n`;
+    // Mostrar campeón si todos los combates están terminados
+    const allMatchesCompleted = bracket.filter(m => m.player2).every(m => m.winner);
+    if (allMatchesCompleted) {
+      const finalMatch = bracket.find(m => m.round === currentRound && m.winner);
+      if (finalMatch && finalMatch.winner) {
+        const champName = (playerNames[finalMatch.winner] || 'Campeón').substring(0, 12).padEnd(12);
+        bracketText += `\n                                ├─→ 👑 ${champName}\n`;
+      } else {
+        bracketText += `\n                                ├─→ 👑 ???\n`;
       }
     } else {
-      bracketText += `\n                                          ├─→ 👑 ???\n`;
+      bracketText += `\n                                ├─→ 👑 ???\n`;
     }
 
     bracketText += '\n╚═════════════════════════════════════════╝\n';
@@ -1159,41 +1162,31 @@ class EventManager {
         });
       }
 
-      // Agregar próximo combate
+      // Verificar si todos los combates están terminados
+      const allMatchesCompleted = bracket.filter(m => m.player2).every(m => m.winner);
+
+      // Agregar combate actual o mostrar ganador
       const pendingMatches = bracket.filter(m => m.round === currentRound && !m.winner && m.player2);
       if (pendingMatches.length > 0) {
         const nextMatch = pendingMatches[0];
         const p1Name = await this.getDisplayName(client, guildId, nextMatch.player1);
         const p2Name = await this.getDisplayName(client, guildId, nextMatch.player2);
         embed.addFields({
-          name: '⚡ Próximo Combate',
+          name: '⚔️ Combate Actual',
           value: `**${p1Name}** 🆚 **${p2Name}**`,
           inline: false
         });
-      } else if (event.status === 'completed' && event.results) {
-        // Mostrar podio
-        const champion = Object.keys(event.results).find(id => event.results[id].rank === 1);
-        const runnerUp = Object.keys(event.results).find(id => event.results[id].rank === 2);
-        const thirdPlace = Object.keys(event.results).find(id => event.results[id].rank === 3);
+      } else if (allMatchesCompleted) {
+        // Todos los combates terminados - mostrar ganador
+        const finalMatch = bracket.find(m => m.round === currentRound && m.winner);
+        if (finalMatch && finalMatch.winner) {
+          const championName = await this.getDisplayName(client, guildId, finalMatch.winner);
+          const runnerUpId = finalMatch.player1 === finalMatch.winner ? finalMatch.player2 : finalMatch.player1;
+          const runnerUpName = await this.getDisplayName(client, guildId, runnerUpId);
 
-        let podiumText = '';
-        if (champion) {
-          const champName = await this.getDisplayName(client, guildId, champion);
-          podiumText += `🥇 **${champName}**\n`;
-        }
-        if (runnerUp) {
-          const runnerName = await this.getDisplayName(client, guildId, runnerUp);
-          podiumText += `🥈 **${runnerName}**\n`;
-        }
-        if (thirdPlace) {
-          const thirdName = await this.getDisplayName(client, guildId, thirdPlace);
-          podiumText += `🥉 **${thirdName}**\n`;
-        }
-
-        if (podiumText) {
           embed.addFields({
-            name: '👑 Podio Final',
-            value: podiumText,
+            name: '👑 ¡Torneo Completado!',
+            value: `🥇 **Campeón:** ${championName}\n🥈 **Subcampeón:** ${runnerUpName}`,
             inline: false
           });
         }
