@@ -1501,6 +1501,9 @@ class EventManager {
     // Avatar mediano del Jugador 2 en thumbnail (esquina superior derecha)
     if (p2Avatar) {
       embed.setThumbnail(p2Avatar);
+    // Avatar pequeño del Jugador 2 en footer (abajo)
+    if (p2Avatar) {
+     embed.setThumbnail(p2Avatar);
     }
 
     return embed;

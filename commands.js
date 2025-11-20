@@ -312,6 +312,22 @@ const commands = [
         )
     ),
 
+  // SISTEMA DE TORNEOS PVP
+  new SlashCommandBuilder()
+    .setName('torneo')
+    .setDescription('🏆 Sistema de torneos PvP - Compite en brackets eliminatorios')
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('bracket')
+        .setDescription('📊 Ver bracket del torneo activo')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('micombate')
+        .setDescription('⚔️ Ver tu combate pendiente en el torneo')
+    ),
+  // Nota: El subcomando 'registrar' fue removido - ahora se usa el Panel de Control automático
+
   // SISTEMA DE ENTRENAMIENTOS
   new SlashCommandBuilder()
     .setName('entrenar')

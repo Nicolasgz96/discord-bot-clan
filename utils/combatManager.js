@@ -343,8 +343,8 @@ class CombatManager {
     // Reducir cooldowns
     this.updateCooldowns(attacker);
 
-    // Regenerar Ki al inicio del turno (solo 1 punto por turno)
-    attacker.ki = Math.min(attacker.ki + CONSTANTS.COMBAT.KI_REGEN_PER_TURN, attacker.maxKi);
+    // Regenerar Ki al inicio del turno
+    attacker.ki = Math.min(attacker.ki + attacker.maxKi, attacker.maxKi);
 
     // Agregar al log
     duel.combatLog.push({
@@ -360,7 +360,7 @@ class CombatManager {
       result.gameOver = true;
       result.winner = gameOver.winner;
       result.reason = gameOver.reason;
-      this.endDuel(duelId);
+      // NO eliminar el duelo aquí - se eliminará desde index.js después de mostrar el resultado
       return result;
     }
 
@@ -373,7 +373,7 @@ class CombatManager {
       result.gameOver = true;
       result.winner = null; // Empate
       result.reason = 'Se alcanzó el límite de turnos';
-      this.endDuel(duelId);
+      // NO eliminar el duelo aquí - se eliminará desde index.js después de mostrar el resultado
     }
 
     return result;
@@ -709,9 +709,34 @@ class CombatManager {
   }
 
   /**
+   * Obtener últimas acciones del combatLog
+   */
+  getRecentCombatLog(duel, count = 3) {
+    if (!duel.combatLog || duel.combatLog.length === 0) {
+      return 'El combate está por comenzar...';
+    }
+
+    const recentActions = duel.combatLog.slice(-count);
+    const challengerName = duel.challenger.userData?.username || 'Retador';
+    const opponentName = duel.opponent.userData?.username || 'Oponente';
+
+    return recentActions.map(log => {
+      const playerName = log.player === 'challenger' ? challengerName : opponentName;
+      return `**${playerName}:** ${log.result}`;
+    }).join('\n');
+  }
+
+  /**
    * Generar embed del estado del combate
    */
   generateCombatEmbed(duel) {
+    if (!duel) {
+      return new EmbedBuilder()
+        .setTitle('⚔️ Combate Finalizado')
+        .setDescription('El duelo ha terminado.')
+        .setColor('#95A5A6');
+    }
+
     const challenger = duel.challenger;
     const opponent = duel.opponent;
 
@@ -723,10 +748,14 @@ class CombatManager {
 
     const currentTurnPlayer = duel.currentPlayer === 'challenger' ? challenger : opponent;
 
-    // Determinar nombre del retador (si tiene userData.username lo usa, sino "Retador")
-    const challengerName = challenger.userData?.username || 'Retador';
-    // Determinar nombre del oponente (IA o jugador)
-    const opponentName = opponent.isAI ? opponent.userData.username : (opponent.userData?.username || 'Oponente');
+    // Obtener nombres de usuario
+    const challengerName = challenger.userData?.username || challenger.username || 'Retador';
+    const opponentName = opponent.userData?.username || opponent.username || 'Oponente';
+
+    // Determinar si hay apuesta
+    const footerText = duel.isArenaBattle
+      ? `Turno de: ${duel.currentPlayer === 'challenger' ? challengerName : opponentName}`
+      : `Turno de: ${duel.currentPlayer === 'challenger' ? challengerName : opponentName} | Apuesta: ${duel.bet} honor`;
 
     const embed = new EmbedBuilder()
       .setTitle(`⚔️ DUELO SAMURÁI - Turno ${duel.turn}`)
@@ -744,16 +773,17 @@ class CombatManager {
         }
       );
 
-    // Footer diferente para arena vs duelos normales
-    if (duel.isArenaBattle) {
-      embed.setFooter({
-        text: `Turno de: ${duel.currentPlayer === 'challenger' ? challengerName : opponentName} | Arena: ${duel.difficulty}`
-      });
-    } else {
-      embed.setFooter({
-        text: `Turno de: ${duel.currentPlayer === 'challenger' ? challengerName : opponentName} | Apuesta: ${duel.bet || 0} honor`
+    // Agregar log de combate reciente
+    const recentLog = this.getRecentCombatLog(duel, 3);
+    if (recentLog) {
+      embed.addFields({
+        name: '📜 Últimas Acciones',
+        value: recentLog,
+        inline: false
       });
     }
+
+    embed.setFooter({ text: footerText });
 
     // Agregar efectos activos
     if (currentTurnPlayer.effects.length > 0) {

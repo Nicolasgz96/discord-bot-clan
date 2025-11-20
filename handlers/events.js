@@ -267,6 +267,52 @@ module.exports = {
           // ====== ANTI-SPAM: Actualizar bracket en lugar de crear mensajes nuevos ======
           // Actualizar el mensaje principal del bracket con el nuevo estado
           await eventManager.updateBracketMessage(tournament.id, interaction.channel, client, dataManager, guildId);
+          // Obtener displayNames para los mensajes
+          const winnerName = await eventManager.getDisplayName(client, guildId, selectedWinner);
+          const loserName = await eventManager.getDisplayName(client, guildId, loser);
+
+          const resultEmbed = new EmbedBuilder()
+            .setColor(COLORS.SUCCESS)
+            .setTitle('🏆 Último Resultado del Torneo')
+            .setDescription(
+              `**${winnerName}** ha derrotado a **${loserName}**\n\n` +
+              `✅ ${winnerName} avanza a la siguiente ronda!`
+            )
+            .setFooter({ text: `Torneo: ${tournament.name}` })
+            .setTimestamp();
+
+          // Siempre crear NUEVO mensaje de resultado (no editar el viejo)
+          // Esto asegura que el resultado sea visible al final del canal
+          const announcementMessage = await interaction.channel.send({ embeds: [resultEmbed] });
+          tournament.metadata.announcementMessageId = announcementMessage.id;
+          eventManager.saveEvents();
+          console.log(`📝 Mensaje de resultado enviado: ${announcementMessage.id}`);
+
+          // Verificar si se avanzó a nueva ronda
+          const updatedTournament = eventManager.getEvent(tournament.id);
+          const updatedBracket = updatedTournament.metadata.bracket;
+          const updatedCurrentRound = Math.max(...updatedBracket.map(m => m.round));
+
+          // Si la ronda cambió, anunciar nueva ronda
+          if (updatedCurrentRound > currentRound) {
+            const newRoundMatches = updatedBracket.filter(m => m.round === updatedCurrentRound && !m.winner && m.player2);
+
+            if (newRoundMatches.length > 0) {
+              await interaction.channel.send({
+                content: `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}** del torneo **${updatedTournament.name}**\n\n**Combates de esta ronda:**`
+              });
+
+              // Anunciar cada combate con los embeds mejorados
+              for (const match of newRoundMatches) {
+                const p1Data = dataManager.getUser(match.player1, guildId);
+                const p2Data = dataManager.getUser(match.player2, guildId);
+                const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, client, guildId);
+
+                await interaction.channel.send({ embeds: [matchEmbed] });
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            }
+          }
 
           // Actualizar mensaje de control con el siguiente combate
           const newControlData = await eventManager.generateTournamentControlMessage(tournament.id, client);
