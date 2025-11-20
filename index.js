@@ -6691,7 +6691,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
                   .setTimestamp();
 
-                await i.editReply({ embeds: [finalEmbed], components: [] });
+                // Enviar anuncio PÚBLICO de ganadores (visible para todos)
+                await i.channel.send({ embeds: [finalEmbed] });
+
+                // Actualizar mensaje ephemeral con confirmación
+                await i.editReply({
+                  content: `✅ **Evento finalizado y premios otorgados**\n\nLos ganadores han sido anunciados en el canal.`,
+                  embeds: [],
+                  components: []
+                });
 
                 // Notify winners via DM
                 for (const winner of winners) {
