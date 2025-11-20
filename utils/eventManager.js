@@ -1227,6 +1227,11 @@ class EventManager {
       throw new Error('No estás inscrito en este evento');
     }
 
+    // Prevenir re-envíos - proteger integridad del sistema de votación
+    if (event.metadata.submissions[userId]) {
+      throw new Error('Ya enviaste una construcción. Contacta a un admin si necesitas cambiarla');
+    }
+
     event.metadata.submissions[userId] = {
       imageUrl,
       description,
