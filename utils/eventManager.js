@@ -773,6 +773,111 @@ class EventManager {
   }
 
   /**
+   * Generate tournament control message with dropdown for next pending match
+   * Returns { embed, components, match } or null if no pending matches
+   */
+  generateTournamentControlMessage(eventId, client) {
+    const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+    const COLORS = require('../src/config/colors');
+    const EMOJIS = require('../src/config/emojis');
+
+    const event = this.getEvent(eventId);
+    if (!event || event.type !== EVENT_TYPES.DUEL_TOURNAMENT) {
+      return null;
+    }
+
+    const bracket = event.metadata.bracket || [];
+    const currentRound = bracket.length > 0 ? Math.max(...bracket.map(m => m.round)) : 0;
+
+    // Get next pending match in current round
+    const pendingMatches = bracket.filter(m => m.round === currentRound && !m.winner && m.player2);
+
+    if (pendingMatches.length === 0) {
+      // No pending matches - check if tournament is complete
+      const totalRounds = Math.ceil(Math.log2(event.participants.length));
+      const allMatchesComplete = bracket.filter(m => m.round === currentRound).every(m => m.winner || !m.player2);
+
+      if (currentRound >= totalRounds && allMatchesComplete) {
+        // Tournament complete
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.SUCCESS)
+          .setTitle('🏆 TORNEO COMPLETADO')
+          .setDescription(
+            `**${event.name}**\n\n` +
+            `¡El torneo ha finalizado! Usa \`/torneo bracket\` para ver el podio final.`
+          )
+          .setTimestamp();
+
+        return { embed, components: [], match: null };
+      } else {
+        // Round complete, waiting for next round
+        const embed = new EmbedBuilder()
+          .setColor(COLORS.PRIMARY)
+          .setTitle('⏳ Ronda Completa')
+          .setDescription(
+            `**${event.name}**\n\n` +
+            `Todos los combates de la Ronda ${currentRound} han sido completados.\n` +
+            `La siguiente ronda se iniciará automáticamente.`
+          )
+          .setTimestamp();
+
+        return { embed, components: [], match: null };
+      }
+    }
+
+    // Get the first pending match
+    const match = pendingMatches[0];
+    const p1User = client.users.cache.get(match.player1);
+    const p2User = client.users.cache.get(match.player2);
+    const p1Name = p1User?.username || 'Guerrero';
+    const p2Name = p2User?.username || 'Guerrero';
+
+    // Create dropdown with both players as options
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('tournament_winner_select')
+      .setPlaceholder('Selecciona el ganador del combate')
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions([
+        {
+          label: `🏆 ${p1Name}`,
+          description: 'Seleccionar como ganador',
+          value: match.player1,
+          emoji: '⚔️'
+        },
+        {
+          label: `🏆 ${p2Name}`,
+          description: 'Seleccionar como ganador',
+          value: match.player2,
+          emoji: '⚔️'
+        }
+      ]);
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
+
+    // Create embed
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.WARNING)
+      .setTitle('🎮 Panel de Control del Torneo')
+      .setDescription(
+        `**${event.name}**\n` +
+        `**Ronda ${currentRound}** - Combate ${bracket.filter(m => m.round === currentRound && m.winner).length + 1}/${bracket.filter(m => m.round === currentRound && m.player2).length}\n\n` +
+        `**Siguiente Combate:**\n` +
+        `<@${match.player1}> ⚔️ <@${match.player2}>\n\n` +
+        `**Combates Restantes:** ${pendingMatches.length}\n\n` +
+        `${EMOJIS.ADMIN} **Solo el creador del evento puede registrar resultados**`
+      )
+      .addFields({
+        name: '📝 Instrucciones',
+        value: '1. Los jugadores completan su combate\n2. Selecciona el ganador del dropdown\n3. El mensaje se actualizará automáticamente al siguiente combate',
+        inline: false
+      })
+      .setTimestamp();
+
+    return { embed, components: [row], match };
+  }
+
+  /**
    * Submit building contest entry
    */
   submitBuildingEntry(eventId, userId, imageUrl, description) {

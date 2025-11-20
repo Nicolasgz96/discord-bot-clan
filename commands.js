@@ -325,12 +325,8 @@ const commands = [
       subcommand
         .setName('micombate')
         .setDescription('⚔️ Ver tu combate pendiente en el torneo')
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName('registrar')
-        .setDescription('✅ Registrar resultado de tu combate (ambos jugadores deben confirmar)')
     ),
+  // Nota: El subcomando 'registrar' fue removido - ahora se usa el Panel de Control automático
 
   // SISTEMA DE ENTRENAMIENTOS
   new SlashCommandBuilder()
