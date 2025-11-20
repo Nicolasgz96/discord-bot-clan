@@ -1466,6 +1466,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const guildId = interaction.guild.id;
 
     try {
+      const { getEventManager } = require('./utils/eventManager');
+      const eventManager = getEventManager();
+
       // Obtener torneo activo
       const activeTournaments = eventManager.getGuildEvents(guildId).filter(e =>
         e.type === 'duel_tournament' &&
