@@ -5950,6 +5950,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager, EVENT_STATUS } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_join_select') {
                 const selectedEventId = i.values[0];
@@ -6122,6 +6126,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_leave_select') {
                 const selectedEventId = i.values[0];
@@ -6264,6 +6272,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
 
             collector.on('collect', async (i) => {
+              // Importar eventManager dinámicamente para evitar problemas de closure
+              const { getEventManager } = require('./utils/eventManager');
+              const eventManager = getEventManager();
+
               try {
                 if (i.customId === 'event_view_select') {
                   const selectedEventId = i.values[0];
@@ -6563,6 +6575,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_finalize_select') {
                 const eventId = i.values[0];
@@ -6772,6 +6788,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_cancel_select') {
                 const eventId = i.values[0];
@@ -6995,6 +7015,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           collector.on('collect', async (i) => {
+            // Importar eventManager dinámicamente para evitar problemas de closure
+            const { getEventManager } = require('./utils/eventManager');
+            const eventManager = getEventManager();
+
             try {
               if (i.customId === 'event_vote_select_event') {
                 const selectedEventId = i.values[0];
