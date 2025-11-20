@@ -6511,6 +6511,56 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await interaction.reply({ embeds: [embed] });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} inició evento: ${event.name}`);
+
+          // Si es un torneo, anunciar los combates de la primera ronda
+          if (event.type === 'duel_tournament' && event.metadata.bracket) {
+            const bracket = event.metadata.bracket;
+            const firstRoundMatches = bracket.filter(m => m.round === 1);
+
+            if (firstRoundMatches.length > 0) {
+              // Anunciar inicio del torneo
+              await interaction.channel.send({
+                content: `\n⚔️ **¡TORNEO INICIADO!** ⚔️\n` +
+                  `**${event.name}**\n\n` +
+                  `**Participantes:** ${event.participants.length}\n` +
+                  `**Ronda 1 - Combates:**`
+              });
+
+              // Anunciar cada combate de la primera ronda
+              for (const match of firstRoundMatches) {
+                if (!match.player2) {
+                  // BYE - anunciar pase automático
+                  await interaction.channel.send({
+                    content: `🎫 <@${match.player1}> pasa automáticamente a la siguiente ronda (BYE)`
+                  });
+                  continue;
+                }
+
+                // Obtener datos de ambos jugadores
+                const p1Data = dataManager.getUser(match.player1, guildId);
+                const p2Data = dataManager.getUser(match.player2, guildId);
+
+                // Generar embed VS
+                const matchEmbed = eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client);
+                matchEmbed.setFooter({ text: `${event.name} | Ronda ${match.round}` });
+
+                await interaction.channel.send({ embeds: [matchEmbed] });
+
+                // Pequeño delay para evitar rate limit
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+
+              // Mensaje final con instrucciones
+              await interaction.channel.send({
+                content: `\n📝 **Instrucciones:**\n` +
+                  `• Usa \`/torneo micombate\` para ver tu combate\n` +
+                  `• Completa tu combate contra tu oponente\n` +
+                  `• Ambos jugadores deben usar \`/torneo registrar\` para confirmar el ganador\n` +
+                  `• Cuando todos los combates terminen, la siguiente ronda comenzará automáticamente\n\n` +
+                  `¡Que gane el mejor guerrero! 🏆`
+              });
+            }
+          }
         } catch (error) {
           console.error('Error iniciando evento:', error.message);
           return interaction.reply({
