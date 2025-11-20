@@ -7576,7 +7576,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       // ========== /evento enviar ==========
       else if (subcommand === 'enviar') {
         const eventoId = interaction.options.getString('evento');
-        const imagenUrl = interaction.options.getString('imagen_url');
+        const imagenAttachment = interaction.options.getAttachment('imagen');
         const descripcionBuild = interaction.options.getString('descripcion') || 'Sin descripción';
 
         try {
@@ -7588,6 +7588,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
               flags: MessageFlags.Ephemeral
             });
           }
+
+          // Validar que el attachment sea una imagen
+          if (!imagenAttachment.contentType || !imagenAttachment.contentType.startsWith('image/')) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} El archivo debe ser una imagen (PNG, JPG, GIF, etc.)`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          const imagenUrl = imagenAttachment.url;
 
           eventManager.submitBuildingEntry(eventoId, userId, imagenUrl, descripcionBuild);
 

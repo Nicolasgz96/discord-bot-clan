@@ -923,10 +923,10 @@ const commands = [
             .setDescription('ID del evento')
             .setRequired(true)
         )
-        .addStringOption(option =>
+        .addAttachmentOption(option =>
           option
-            .setName('imagen_url')
-            .setDescription('URL de la imagen de tu construcción')
+            .setName('imagen')
+            .setDescription('Imagen de tu construcción (arrastra y suelta)')
             .setRequired(true)
         )
         .addStringOption(option =>
