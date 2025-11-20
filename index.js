@@ -6496,6 +6496,76 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await interaction.reply({ embeds: [embed] });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} inició evento: ${event.name}`);
+
+          // Actualizar mensaje de anuncio del evento (cambiar estado a Activo)
+          if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+            try {
+              const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+              const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+              const updatedEmbed = new EmbedBuilder()
+                .setColor(COLORS.SUCCESS)
+                .setTitle(`${event.emoji} Evento Creado`)
+                .setDescription(
+                  `**${event.name}**\n` +
+                  `${event.description}\n\n` +
+                  `**ID:** \`${event.id}\`\n` +
+                  `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                  `**Estado:** ▶️ Activo\n` +
+                  `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                  `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                  `¡El evento ha comenzado! Usa \`/evento ver evento:${event.name}\` para más detalles.`
+                )
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              await announcementMessage.edit({ embeds: [updatedEmbed] });
+            } catch (err) {
+              console.error('Error actualizando mensaje de anuncio del evento al iniciar:', err.message);
+            }
+          }
+
+          // Si es un torneo, crear mensaje principal del bracket (ANTI-SPAM)
+          if (event.type === 'duel_tournament' && event.metadata.bracket) {
+            try {
+              // Crear el mensaje inicial del bracket
+              const bracketMessage = await interaction.channel.send({
+                content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con ${event.participants.length} participantes\n\n_El bracket se actualizará automáticamente..._`
+              });
+
+              // Guardar el ID del mensaje del bracket
+              event.metadata.bracketMessageId = bracketMessage.id;
+              eventManager.saveEvents();
+              console.log(`📊 Mensaje inicial del bracket creado: ${bracketMessage.id}`);
+
+              // Actualizar inmediatamente con el bracket completo
+              await eventManager.updateBracketMessage(event.id, interaction.channel, interaction.client, dataManager, guildId);
+
+              console.log(`✅ Bracket inicial generado para ${event.name}`);
+
+              // Crear mensaje de control persistente (solo visible para creador/admin)
+              await interaction.channel.send({
+                content: `\n${'─'.repeat(50)}\n🎮 **PANEL DE CONTROL DEL TORNEO** 🎮\n${'─'.repeat(50)}`
+              });
+
+              const controlData = eventManager.generateTournamentControlMessage(event.id, interaction.client);
+              if (controlData && controlData.match) {
+                const controlMessage = await interaction.channel.send({
+                  embeds: [controlData.embed],
+                  components: controlData.components
+                });
+
+                // Guardar messageId y channelId en metadata
+                event.metadata.controlMessageId = controlMessage.id;
+                event.metadata.controlChannelId = interaction.channel.id;
+                eventManager.saveEvents();
+
+                console.log(`✅ Mensaje de control creado: ${controlMessage.id} para torneo ${event.id}`);
+              }
+            } catch (bracketError) {
+              console.error(`❌ Error creando bracket inicial del torneo:`, bracketError);
+            }
+          }
         } catch (error) {
           console.error('Error iniciando evento:', error.message);
           return interaction.reply({
