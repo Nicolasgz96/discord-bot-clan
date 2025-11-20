@@ -1578,6 +1578,126 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return; // Terminar aquí para evitar el procesamiento de comandos
   }
 
+  // ========== HANDLER PARA DROPDOWN DE INICIAR EVENTO ==========
+  if (interaction.isStringSelectMenu() && interaction.customId === 'event_start_select') {
+    const userId = interaction.user.id;
+    const guildId = interaction.guild.id;
+
+    try {
+      // Verificar permisos de administrador
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.update({
+          content: `${EMOJIS.ERROR} Solo los administradores pueden iniciar eventos.`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      const selectedEventId = interaction.values[0];
+      const { getEventManager, EVENT_STATUS } = require('./utils/eventManager');
+      const eventManager = getEventManager();
+      const event = eventManager.getEvent(selectedEventId);
+
+      if (!event) {
+        return interaction.update({
+          content: `${EMOJIS.ERROR} El evento seleccionado ya no existe.`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      if (event.status !== EVENT_STATUS.PENDING) {
+        return interaction.update({
+          content: `${EMOJIS.ERROR} Este evento ya no está pendiente (Estado: ${event.status}).`,
+          embeds: [],
+          components: []
+        });
+      }
+
+      // Iniciar el evento
+      eventManager.startEvent(event.id);
+
+      const embed = new EmbedBuilder()
+        .setColor(COLORS.SUCCESS)
+        .setTitle(`${event.emoji} ¡Evento Iniciado!`)
+        .setDescription(
+          `**${event.name}** ha comenzado.\n\n` +
+          `**Participantes:** ${event.participants.length}\n` +
+          `**Finaliza:** <t:${Math.floor(event.endTime / 1000)}:R>`
+        )
+        .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+        .setTimestamp();
+
+      await interaction.update({ embeds: [embed], components: [] });
+
+      // Anunciar en el canal
+      await interaction.channel.send({
+        content: `${event.emoji} **¡Evento Iniciado!**\n**${event.name}** ha comenzado con **${event.participants.length} participantes**.`
+      });
+
+      // Si es un torneo de duelos, anunciar combates y enviar panel de control
+      if (event.type === 'duel_tournament' && event.metadata.bracket) {
+        const bracket = event.metadata.bracket;
+        const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
+
+        if (firstRoundMatches.length > 0) {
+          await interaction.channel.send({
+            content: `\n🎊 **¡TORNEO INICIADO!** 🎊\n**${event.name}**\n\n**Combates de la primera ronda:**`
+          });
+
+          // Anunciar cada combate de la primera ronda
+          for (const match of firstRoundMatches) {
+            const p1Data = dataManager.getUser(match.player1, guildId);
+            const p2Data = dataManager.getUser(match.player2, guildId);
+
+            const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client, guildId);
+            await interaction.channel.send({ embeds: [matchEmbed] });
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+
+          // Enviar mensaje de control (solo visible para el admin)
+          const controlData = await eventManager.generateTournamentControlMessage(event.id, interaction.client);
+
+          if (controlData) {
+            await interaction.followUp({
+              content: `🏆 **Panel de Control del Torneo** (solo tú puedes ver esto)\n\nSelecciona el ganador de cada combate:`,
+              embeds: [controlData.embed],
+              components: controlData.components,
+              ephemeral: true
+            });
+          }
+        }
+
+        // Crear mensaje del bracket (ANTI-SPAM)
+        try {
+          const bracketMessage = await interaction.channel.send({
+            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con ${event.participants.length} participantes\n\n_El bracket se actualizará automáticamente..._`
+          });
+
+          event.metadata.bracketMessageId = bracketMessage.id;
+          eventManager.saveEvents();
+
+          // Actualizar bracket inmediatamente
+          await eventManager.updateBracketMessage(event.id, interaction.channel, interaction.client, dataManager, guildId);
+        } catch (bracketError) {
+          console.error(`❌ Error creando bracket inicial del torneo:`, bracketError);
+        }
+      }
+
+      console.log(`✅ ${interaction.user.tag} inició evento desde dropdown: ${event.name}`);
+    } catch (error) {
+      console.error('Error manejando inicio de evento desde dropdown:', error);
+      await interaction.update({
+        content: `${EMOJIS.ERROR} Error al iniciar el evento: ${error.message}`,
+        embeds: [],
+        components: []
+      }).catch(() => {});
+    }
+
+    return; // Terminar aquí
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName } = interaction;
@@ -6757,6 +6877,49 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
         const eventoQuery = interaction.options.getString('evento');
+
+        // Si no se especifica evento, mostrar dropdown
+        if (!eventoQuery) {
+          const guildEvents = eventManager.getGuildEvents(guildId);
+          const pendingEvents = guildEvents.filter(e => e.status === EVENT_STATUS.PENDING);
+
+          if (pendingEvents.length === 0) {
+            return interaction.reply({
+              content: `${EMOJIS.ERROR} No hay eventos pendientes para iniciar.`,
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Crear opciones del dropdown
+          const options = pendingEvents.map(event =>
+            new StringSelectMenuOptionBuilder()
+              .setLabel(event.name.substring(0, 100))
+              .setDescription(`${event.emoji} ${event.participants.length}/${event.maxParticipants} participantes`.substring(0, 100))
+              .setValue(event.id)
+              .setEmoji(event.emoji)
+          );
+
+          const selectMenu = new StringSelectMenuBuilder()
+            .setCustomId('event_start_select')
+            .setPlaceholder('▶️ Selecciona un evento para iniciar')
+            .addOptions(options);
+
+          const row = new ActionRowBuilder()
+            .addComponents(selectMenu);
+
+          const embed = new EmbedBuilder()
+            .setColor(COLORS.PRIMARY)
+            .setTitle('▶️ Iniciar Evento')
+            .setDescription(`Selecciona el evento que deseas iniciar (${pendingEvents.length} disponibles):`)
+            .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+            .setTimestamp();
+
+          return interaction.reply({
+            embeds: [embed],
+            components: [row],
+            flags: MessageFlags.Ephemeral
+          });
+        }
 
         try {
           let event = eventManager.getEvent(eventoQuery);

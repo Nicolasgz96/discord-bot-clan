@@ -870,8 +870,8 @@ const commands = [
         .addStringOption(option =>
           option
             .setName('evento')
-            .setDescription('Nombre o ID del evento')
-            .setRequired(true)
+            .setDescription('Nombre o ID del evento (opcional - muestra menú si se omite)')
+            .setRequired(false)
         )
     )
     .addSubcommand(subcommand =>
