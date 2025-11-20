@@ -67,6 +67,15 @@ module.exports = {
           .setTimestamp();
 
         await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+
+        // Eliminar mensaje original con el dropdown para limpiar el chat
+        try {
+          await originalMessage.delete();
+          console.log(`🗑️ Mensaje con dropdown eliminado para ${interaction.user.tag}`);
+        } catch (delError) {
+          console.log(`⚠️ No se pudo eliminar mensaje original: ${delError.message}`);
+        }
+
         console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} envió construcción al evento: ${event.name}`);
       } catch (error) {
         console.error('Error enviando construcción:', error);
