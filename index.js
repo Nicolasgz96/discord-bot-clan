@@ -1507,7 +1507,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   // Comandos que NO requieren estar en el canal de comandos
-  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas'];
+  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas', 'arena', 'entrenar', 'equipar'];
 
   // Verificar si el comando debe ejecutarse en un canal específico
   // (excluir comandos de música y achievements ya que tienen su propia verificación)
@@ -9070,6 +9070,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // Establecer cooldown
           dataManager.setCooldown(userId, 'arena', CONSTANTS.ARENA.COOLDOWN);
 
+          // Agregar username al userData para el combate
+          userData.username = interaction.user.username;
+          userData.userId = userId;
+
           // Crear combate vs IA
           const combatManager = require('./utils/combatManager');
           const duelId = combatManager.createArenaBattle(userData, selectedDifficulty);
@@ -9110,6 +9114,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
             }
 
             const updatedDuel = combatManager.getDuel(duelId);
+
+            // Verificar que el duelo aún existe
+            if (!updatedDuel) {
+              return btnInteraction.followUp({
+                content: '❌ El combate ha finalizado o expiró.',
+                flags: MessageFlags.Ephemeral
+              });
+            }
 
             if (result.gameOver) {
               const finalEmbed = combatManager.generateCombatEmbed(updatedDuel);
@@ -9161,6 +9173,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const aiResult = combatManager.processAction(duelId, updatedDuel.opponent.userId, aiAction.actionType, aiAction.actionData);
 
             const duelAfterAI = combatManager.getDuel(duelId);
+
+            // Verificar que el duelo aún existe después del turno de IA
+            if (!duelAfterAI) {
+              return btnInteraction.followUp({
+                content: '❌ El combate ha finalizado.',
+                flags: MessageFlags.Ephemeral
+              });
+            }
 
             if (aiResult.gameOver) {
               const finalEmbed = combatManager.generateCombatEmbed(duelAfterAI);
@@ -9327,6 +9347,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Establecer cooldown
       dataManager.setCooldown(userId, 'arena', CONSTANTS.ARENA.COOLDOWN);
+
+      // Agregar username al userData para el combate
+      userData.username = interaction.user.username;
+      userData.userId = userId;
 
       // Crear combate vs IA
       const combatManager = require('./utils/combatManager');
@@ -9505,6 +9529,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         // Continuar combate - actualizar estado
         const updatedDuel = combatManager.getDuel(duelId);
+
+        // Verificar que el duelo aún existe
+        if (!updatedDuel) {
+          return buttonInteraction.update({
+            content: '❌ El combate ha finalizado.',
+            components: []
+          });
+        }
+
         const updatedEmbed = combatManager.generateCombatEmbed(updatedDuel);
         const updatedButtons = combatManager.generateCombatButtons(updatedDuel.challenger);
 
