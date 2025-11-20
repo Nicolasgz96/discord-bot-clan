@@ -1633,19 +1633,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       await interaction.update({ embeds: [embed], components: [] });
 
-      // Anunciar en el canal
-      await interaction.channel.send({
-        content: `${event.emoji} **¡Evento Iniciado!**\n**${event.name}** ha comenzado con **${event.participants.length} participantes**.`
-      });
-
       // Si es un torneo de duelos, anunciar combates y enviar panel de control
       if (event.type === 'duel_tournament' && event.metadata.bracket) {
         const bracket = event.metadata.bracket;
         const firstRoundMatches = bracket.filter(m => m.round === 1 && m.player2);
 
         if (firstRoundMatches.length > 0) {
+          // Anunciar inicio del torneo con combates
           await interaction.channel.send({
-            content: `\n🎊 **¡TORNEO INICIADO!** 🎊\n**${event.name}**\n\n**Combates de la primera ronda:**`
+            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con **${event.participants.length} participantes**\n\n**Combates de la primera ronda:**`
           });
 
           // Anunciar cada combate de la primera ronda
@@ -1675,7 +1671,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         // Crear mensaje del bracket (ANTI-SPAM)
         try {
           const bracketMessage = await interaction.channel.send({
-            content: `⚔️ **¡TORNEO INICIADO!** ⚔️\n**${event.name}** con ${event.participants.length} participantes\n\n_El bracket se actualizará automáticamente..._`
+            content: `📊 **Bracket del Torneo:**\n_Actualizándose automáticamente..._`
           });
 
           event.metadata.bracketMessageId = bracketMessage.id;
@@ -1686,6 +1682,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (bracketError) {
           console.error(`❌ Error creando bracket inicial del torneo:`, bracketError);
         }
+      }
+      // Para eventos que no son torneos, anunciar en el canal
+      else {
+        await interaction.channel.send({
+          content: `${event.emoji} **¡Evento Iniciado!**\n**${event.name}** ha comenzado con **${event.participants.length} participantes**.`
+        });
       }
 
       console.log(`✅ ${interaction.user.tag} inició evento desde dropdown: ${event.name}`);
