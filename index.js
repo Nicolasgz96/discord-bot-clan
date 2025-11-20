@@ -6792,10 +6792,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
 
           const leaderboardText = await Promise.all(leaderboard.map(async (entry, index) => {
-            const user = await client.users.fetch(entry.userId).catch(() => null);
-            const username = user ? user.username : 'Usuario desconocido';
+            // Usar displayName del servidor en lugar de username
+            const displayName = await eventManager.getDisplayName(client, guildId, entry.userId);
             const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-            return `${medal} **${username}** - ${entry.score} puntos`;
+            return `${medal} **${displayName}** - ${entry.score} puntos`;
           }));
 
           const embed = new EmbedBuilder()
