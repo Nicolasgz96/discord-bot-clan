@@ -33,24 +33,26 @@ module.exports = {
 
     if (!isEventInteraction) return;
 
-    // CRITICAL: Wait for collectors in index.js to handle it first
+    // CRITICAL: Wait for collectors in index.js to handle it first (EXCEPT for building_submit_event)
     // Collectors are created with the command and should have priority
-    // Increased delay to 500ms to ensure collector finishes first
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Building submit events don't have collectors, so process immediately
+    const isBuildingSubmit = interaction.customId.startsWith('building_submit_event:');
 
-    // Verificar si la interacción ya fue manejada (por collectors en index.js)
-    // Los collectors tienen prioridad, este handler es un fallback
-    // Check multiple states to be absolutely sure
-    if (interaction.replied || interaction.deferred) {
-      console.log(`🔄 Handler: Interaction ${interaction.id} already handled by collector, skipping`);
-      return;
-    }
+    if (!isBuildingSubmit) {
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Additional safety check - if the interaction is too old, don't process
-    const interactionAge = Date.now() - interaction.createdTimestamp;
-    if (interactionAge > 2500) {
-      console.log(`⏱️ Handler: Interaction ${interaction.id} too old (${interactionAge}ms), skipping`);
-      return;
+      // Verificar si la interacción ya fue manejada (por collectors en index.js)
+      if (interaction.replied || interaction.deferred) {
+        console.log(`🔄 Handler: Interaction ${interaction.id} already handled by collector, skipping`);
+        return;
+      }
+
+      // Additional safety check - if the interaction is too old, don't process
+      const interactionAge = Date.now() - interaction.createdTimestamp;
+      if (interactionAge > 2500) {
+        console.log(`⏱️ Handler: Interaction ${interaction.id} too old (${interactionAge}ms), skipping`);
+        return;
+      }
     }
 
     // Importar eventManager dinámicamente para cada interacción
