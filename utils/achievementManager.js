@@ -398,6 +398,22 @@ const ACHIEVEMENTS = {
     requirement: { type: 'midnightMessages', count: 100 }, // Exactly at midnight
     reward: { koku: 3000, title: 'Nocturno' },
     hidden: true
+  },
+
+  // ========== EXCLUSIVE ACHIEVEMENTS ==========
+
+  god_status: {
+    id: 'god_status',
+    name: 'DIOS',
+    nameEn: 'GOD',
+    description: 'Estatus divino - Exclusivo',
+    category: 'special',
+    tier: 'legendary',
+    emoji: '👑',
+    requirement: { type: 'special', value: 'god_granted' },
+    reward: { koku: 10000, title: 'DIOS' },
+    hidden: true,
+    restrictedTo: '402345019584937984' // Usuario exclusivo
   }
 };
 

@@ -692,6 +692,26 @@ const commands = [
     .setName('medallas')
     .setDescription('🏅 Ver tus medallas y progreso de logros'),
 
+  new SlashCommandBuilder()
+    .setName('otorgar-logro')
+    .setDescription('👑 [ADMIN] Otorgar logro especial a un usuario')
+    .addUserOption(option =>
+      option
+        .setName('usuario')
+        .setDescription('Usuario al que otorgar el logro')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName('logro')
+        .setDescription('ID del logro a otorgar')
+        .setRequired(true)
+        .addChoices(
+          { name: '👑 DIOS (Exclusivo)', value: 'god_status' },
+          { name: '⛓️ El Esclavizador (Exclusivo)', value: 'recruiter' }
+        )
+    ),
+
   // ==================== PERSONALIZACIÓN DE PERFIL ====================
   new SlashCommandBuilder()
     .setName('personalizar')

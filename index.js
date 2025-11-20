@@ -5882,6 +5882,100 @@ client.on(Events.InteractionCreate, async (interaction) => {
       console.log(`${EMOJIS.HONOR} ${interaction.user.tag} consultó sus logros (${stats.total}/${stats.totalPossible})`);
     }
 
+    // ==================== OTORGAR LOGROS (ADMIN) ====================
+
+    // /otorgar-logro - Otorgar logro especial a un usuario (solo administradores)
+    else if (commandName === 'otorgar-logro') {
+      // Check if user is administrator
+      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({
+          content: `${EMOJIS.ERROR} Este comando solo puede ser usado por administradores.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const targetUser = interaction.options.getUser('usuario');
+      const achievementId = interaction.options.getString('logro');
+      const guildId = interaction.guild.id;
+
+      const achievementManager = require('./utils/achievementManager');
+      const achievement = achievementManager.ACHIEVEMENTS[achievementId];
+
+      if (!achievement) {
+        return interaction.reply({
+          content: `${EMOJIS.ERROR} Logro no encontrado.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Check if achievement is restricted to specific user
+      if (achievement.restrictedTo && achievement.restrictedTo !== targetUser.id) {
+        return interaction.reply({
+          content: `${EMOJIS.ERROR} Este logro está restringido a otro usuario específico.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Check if user already has the achievement
+      if (achievementManager.hasAchievement(targetUser.id, guildId, achievementId)) {
+        return interaction.reply({
+          content: `${EMOJIS.ERROR} ${targetUser.username} ya tiene este logro.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      // Award the achievement
+      const awarded = achievementManager.awardAchievement(targetUser.id, guildId, achievementId);
+
+      if (awarded) {
+        const tierInfo = achievementManager.TIER_INFO[achievement.tier];
+
+        // Assign achievement role/tag if applicable
+        if (achievementManager.shouldCreateRoleTag(achievement)) {
+          try {
+            await achievementManager.assignAchievementRole(interaction.guild, targetUser.id, achievement);
+          } catch (e) {
+            console.error('Error asignando rol de logro:', e.message);
+          }
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor(tierInfo.color)
+          .setTitle(`${EMOJIS.SUCCESS} Logro Otorgado`)
+          .setDescription(
+            `Has otorgado el logro a <@${targetUser.id}>:\n\n` +
+            `${achievement.emoji} **${achievement.name}** ${tierInfo.emoji}\n` +
+            `*${achievement.description}*\n\n` +
+            `**Recompensa:** ${achievement.reward?.koku || 0} ${EMOJIS.KOKU}` +
+            (achievement.reward?.title ? ` + Título: **"${achievement.reward.title}"**` : '')
+          )
+          .setFooter({ text: `Tier: ${tierInfo.name}` })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
+
+        // Notify user via DM
+        try {
+          const user = await client.users.fetch(targetUser.id);
+          await user.send(
+            `🎉 **¡Has recibido un logro especial!**\n\n` +
+            `${achievement.emoji} **${achievement.name}** ${tierInfo.emoji}\n` +
+            `*${achievement.description}*\n\n` +
+            `**Recompensa:** ${achievement.reward?.koku || 0} ${EMOJIS.KOKU}` +
+            (achievement.reward?.title ? ` + Título: **"${achievement.reward.title}"**` : '') +
+            `\n\n¡Puedes equipar esta etiqueta en tu perfil del servidor!`
+          );
+        } catch (e) {
+          // Ignore DM failures
+        }
+      } else {
+        return interaction.reply({
+          content: `${EMOJIS.ERROR} Error al otorgar el logro.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+    }
+
     // ==================== PERSONALIZACIÓN DE PERFIL ====================
 
     // /personalizar - Sistema de personalización
