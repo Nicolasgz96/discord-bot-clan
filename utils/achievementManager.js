@@ -297,11 +297,11 @@ const ACHIEVEMENTS = {
     id: 'recruiter',
     name: 'El Esclavizador',
     nameEn: 'The Enslaver',
-    description: 'Invita 5 personas al servidor',
+    description: 'Invita 1 persona al servidor',
     category: 'special',
     tier: 'silver',
     emoji: '⛓️',
-    requirement: { type: 'invites', count: 5 },
+    requirement: { type: 'invites', count: 1 },
     reward: { koku: 1000, title: 'El Esclavizador' },
     hidden: false,
     restrictedTo: '615330007153246209' // Solo este usuario puede obtener este logro
