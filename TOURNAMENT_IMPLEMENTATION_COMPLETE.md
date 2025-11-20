@@ -28,6 +28,12 @@ He implementado **completamente** el sistema de torneos con todas las mejoras so
 - Fallback: `member.displayName` → `user.username` → `userId`
 - Todos los embeds y mensajes usan displayNames en lugar de usernames
 
+### 5. ✅ Anuncio de Ganadores PÚBLICO
+- El anuncio de ganadores (🏆 Ganadores:) es ahora **visible para todos** en el canal
+- Ya no se muestra solo al creador del evento (mensaje ephemeral)
+- El creador recibe confirmación ephemeral de que el evento fue finalizado
+- Todos los miembros del servidor pueden ver quiénes ganaron
+
 ---
 
 ## 📦 Archivos Modificados
@@ -139,6 +145,15 @@ En el panel de control ephemeral:
 3. **Verifica que usa NICKS** del servidor, no usernames
 4. Si hay nueva ronda, verifica que se anuncie automáticamente
 
+### Paso 8: Finalizar Torneo y Ver Ganadores
+
+Cuando el torneo termine (última ronda completada):
+1. Usa `/evento finalizar` y selecciona el torneo
+2. **Verifica que el anuncio de ganadores aparece en el CANAL** (público, visible para todos)
+3. **Verifica que otros usuarios pueden ver el mensaje de ganadores** (no es ephemeral)
+4. Tú recibirás un mensaje ephemeral de confirmación: "✅ Evento finalizado y premios otorgados"
+5. Los ganadores también recibirán DM con sus premios
+
 ---
 
 ## ✅ Checklist de Verificación
@@ -152,6 +167,7 @@ Después de probar, verifica que:
 - [ ] Las nuevas rondas se anuncian automáticamente
 - [ ] El panel de control se actualiza con el siguiente combate
 - [ ] Solo el creador o admins pueden seleccionar ganadores
+- [ ] **El anuncio de ganadores es PÚBLICO** (todos los usuarios lo ven en el canal)
 
 ---
 
@@ -322,6 +338,6 @@ Si encuentras algún error:
 ---
 
 **Última Actualización:** 2025-01-20
-**Commit:** `6856ced` - feat: Implement complete tournament system with UI improvements
+**Commit:** `935f009` - fix: Make tournament winner announcement public instead of ephemeral
 **Branch:** `claude/fix-event-startup-0119FnzAyPrc3bw7WTzT5T3G`
 **Estado:** ✅ LISTO PARA USAR
