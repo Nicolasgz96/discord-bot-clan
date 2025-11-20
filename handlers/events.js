@@ -31,13 +31,23 @@ module.exports = {
 
     if (!isEventInteraction) return;
 
-    // CRITICAL: Wait a moment to let collectors in index.js handle it first
+    // CRITICAL: Wait for collectors in index.js to handle it first
     // Collectors are created with the command and should have priority
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Increased delay to 500ms to ensure collector finishes first
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     // Verificar si la interacción ya fue manejada (por collectors en index.js)
     // Los collectors tienen prioridad, este handler es un fallback
+    // Check multiple states to be absolutely sure
     if (interaction.replied || interaction.deferred) {
+      console.log(`🔄 Handler: Interaction ${interaction.id} already handled by collector, skipping`);
+      return;
+    }
+
+    // Additional safety check - if the interaction is too old, don't process
+    const interactionAge = Date.now() - interaction.createdTimestamp;
+    if (interactionAge > 2500) {
+      console.log(`⏱️ Handler: Interaction ${interaction.id} too old (${interactionAge}ms), skipping`);
       return;
     }
 
