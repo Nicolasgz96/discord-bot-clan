@@ -284,17 +284,21 @@ module.exports = {
             try {
               announcementMessage = await interaction.channel.messages.fetch(tournament.metadata.announcementMessageId);
               await announcementMessage.edit({ embeds: [resultEmbed] });
+              console.log(`📝 Mensaje de resultado actualizado: ${announcementMessage.id}`);
             } catch (error) {
               // Si no se encuentra, crear nuevo
+              console.log(`⚠️ No se pudo editar mensaje de anuncio, creando nuevo: ${error.message}`);
               announcementMessage = await interaction.channel.send({ embeds: [resultEmbed] });
               tournament.metadata.announcementMessageId = announcementMessage.id;
               eventManager.saveEvents();
+              console.log(`📝 Nuevo mensaje de resultado creado: ${announcementMessage.id}`);
             }
           } else {
             // Crear nuevo mensaje de anuncio
             announcementMessage = await interaction.channel.send({ embeds: [resultEmbed] });
             tournament.metadata.announcementMessageId = announcementMessage.id;
             eventManager.saveEvents();
+            console.log(`📝 Mensaje de resultado inicial creado: ${announcementMessage.id}`);
           }
 
           // Verificar si se avanzó a nueva ronda
@@ -327,6 +331,7 @@ module.exports = {
           const newControlData = await eventManager.generateTournamentControlMessage(tournament.id, client);
 
           if (newControlData) {
+            console.log(`🎮 Hay más combates pendientes, enviando nuevo panel de control...`);
             // Enviar nuevo panel de control como followUp efímero
             // (no podemos editar el mensaje original porque es ephemeral de otra interacción)
             const newControlMessage = await interaction.followUp({
@@ -346,10 +351,12 @@ module.exports = {
             }
           } else {
             // No hay más combates, torneo terminado
+            console.log(`🏁 Torneo completado, no hay más combates. Enviando mensaje final...`);
             await interaction.followUp({
               content: `✅ **¡Torneo completado!** No hay más combates pendientes.\n\nUsa \`/evento finalizar evento:${tournament.name}\` para otorgar premios.`,
               ephemeral: true
             });
+            console.log(`✅ Mensaje de torneo completado enviado`);
           }
 
           console.log(`✅ Resultado registrado: ${selectedWinner} ganó en torneo ${tournament.id}`);
