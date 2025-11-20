@@ -153,6 +153,15 @@ module.exports = {
                       console.error('Error enviando notificación de logro al canal:', e.message);
                     }
                   }
+
+                  // Assign achievement role/tag (appears in server profile)
+                  if (achievementManager.shouldCreateRoleTag(achievement)) {
+                    try {
+                      await achievementManager.assignAchievementRole(oldState.guild, userId, achievement);
+                    } catch (e) {
+                      console.error('Error asignando rol de logro:', e.message);
+                    }
+                  }
                 }
               }
 

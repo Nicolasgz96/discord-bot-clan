@@ -729,6 +729,80 @@ function getRarestAchievement(userId, guildId) {
   return badges.length > 0 ? badges[0] : null;
 }
 
+/**
+ * Create or get achievement role for server tags
+ * @param {Guild} guild - Discord guild
+ * @param {Object} achievement - Achievement object
+ * @returns {Promise<Role|null>} Role object or null
+ */
+async function createOrGetAchievementRole(guild, achievement) {
+  try {
+    const roleName = `🏆 ${achievement.name}`;
+    const tierInfo = TIER_INFO[achievement.tier];
+
+    // Check if role already exists
+    let role = guild.roles.cache.find(r => r.name === roleName);
+
+    if (!role) {
+      // Create the role with tier color (appears in server profile as tag)
+      role = await guild.roles.create({
+        name: roleName,
+        color: tierInfo.color,
+        reason: `Etiqueta de logro: ${achievement.name} (${tierInfo.name})`,
+        mentionable: false,
+        hoist: false, // Don't separate in member list
+        permissions: []
+      });
+      console.log(`✅ Rol de logro creado: ${roleName} (${tierInfo.name})`);
+    }
+
+    return role;
+  } catch (error) {
+    console.error(`❌ Error creando rol para logro ${achievement.name}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Assign achievement role to user (appears as server tag)
+ * @param {Guild} guild - Discord guild
+ * @param {string} userId - User ID
+ * @param {Object} achievement - Achievement object
+ * @returns {Promise<boolean>} Success status
+ */
+async function assignAchievementRole(guild, userId, achievement) {
+  try {
+    const member = await guild.members.fetch(userId);
+    if (!member) return false;
+
+    const role = await createOrGetAchievementRole(guild, achievement);
+    if (!role) return false;
+
+    // Check if user already has the role
+    if (member.roles.cache.has(role.id)) {
+      return true;
+    }
+
+    await member.roles.add(role);
+    console.log(`🏷️ Etiqueta de logro asignada a ${member.user.username}: ${role.name}`);
+    return true;
+  } catch (error) {
+    console.error(`❌ Error asignando rol de logro:`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Check if achievement should create a role/tag
+ * Creates roles for: Gold, Platinum, Legendary tiers or achievements with title rewards
+ * @param {Object} achievement - Achievement object
+ * @returns {boolean}
+ */
+function shouldCreateRoleTag(achievement) {
+  const roleWorthyTiers = ['gold', 'platinum', 'legendary'];
+  return roleWorthyTiers.includes(achievement.tier) || achievement.reward?.title;
+}
+
 module.exports = {
   ACHIEVEMENTS,
   TIER_INFO,
@@ -740,5 +814,7 @@ module.exports = {
   getAchievementLeaderboard,
   getFeaturedBadges,
   formatBadgesDisplay,
-  getRarestAchievement
+  getRarestAchievement,
+  assignAchievementRole,
+  shouldCreateRoleTag
 };

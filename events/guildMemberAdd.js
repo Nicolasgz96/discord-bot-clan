@@ -110,6 +110,15 @@ module.exports = {
                         `**Recompensa:** +${achievement.reward?.koku || 0} ${EMOJIS.KOKU}` +
                         (achievement.reward?.title ? ` + Título "${achievement.reward.title}"` : '')
               });
+
+              // Assign achievement role/tag (appears in server profile)
+              if (achievementManager.shouldCreateRoleTag(achievement)) {
+                try {
+                  await achievementManager.assignAchievementRole(member.guild, inviterId, achievement);
+                } catch (e) {
+                  console.error('Error asignando rol de logro:', e.message);
+                }
+              }
             }
           }
         }
