@@ -360,7 +360,7 @@ class CombatManager {
       result.gameOver = true;
       result.winner = gameOver.winner;
       result.reason = gameOver.reason;
-      this.endDuel(duelId);
+      // NO eliminar el duelo aquí - se eliminará desde index.js después de mostrar el resultado
       return result;
     }
 
@@ -373,7 +373,7 @@ class CombatManager {
       result.gameOver = true;
       result.winner = null; // Empate
       result.reason = 'Se alcanzó el límite de turnos';
-      this.endDuel(duelId);
+      // NO eliminar el duelo aquí - se eliminará desde index.js después de mostrar el resultado
     }
 
     return result;

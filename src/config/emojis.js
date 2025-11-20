@@ -61,6 +61,7 @@ const EMOJIS = {
   // Clan
   CLAN: '🏯',
   LEADER: '👑',
+  MEMBER: '🥷',
   MEMBERS: '👥',
   CLAN_TAG: '📛',
   CLAN_INFO: '📜',

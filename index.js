@@ -1460,6 +1460,125 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 client.on(Events.InteractionCreate, async (interaction) => {
+  // ========== HANDLER PARA DROPDOWN DEL PANEL DE CONTROL DEL TORNEO ==========
+  if (interaction.isStringSelectMenu() && interaction.customId === 'tournament_winner_select') {
+    const userId = interaction.user.id;
+    const guildId = interaction.guild.id;
+
+    try {
+      // Obtener torneo activo
+      const activeTournaments = eventManager.getGuildEvents(guildId).filter(e =>
+        e.type === 'duel_tournament' &&
+        e.status === 'active' &&
+        e.metadata.controlMessageId === interaction.message.id
+      );
+
+      if (activeTournaments.length === 0) {
+        return interaction.reply({
+          content: `${EMOJIS.ERROR} No se encontró el torneo activo para este mensaje.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const tournament = activeTournaments[0];
+
+      // Verificar que el usuario es admin o creador del evento
+      const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+      const isCreator = tournament.creatorId === userId;
+
+      if (!isAdmin && !isCreator) {
+        return interaction.reply({
+          content: `${EMOJIS.ERROR} Solo el creador del evento o administradores pueden registrar resultados.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      await interaction.deferUpdate();
+
+      const selectedWinner = interaction.values[0];
+
+      // Obtener el combate actual para encontrar al perdedor
+      const bracket = tournament.metadata.bracket;
+      const currentRound = Math.max(...bracket.map(m => m.round));
+      const currentMatch = bracket.find(m =>
+        m.round === currentRound &&
+        !m.winner &&
+        m.player2 &&
+        (m.player1 === selectedWinner || m.player2 === selectedWinner)
+      );
+
+      if (!currentMatch) {
+        return interaction.followUp({
+          content: `${EMOJIS.ERROR} No se pudo encontrar el combate correspondiente.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const loser = currentMatch.player1 === selectedWinner ? currentMatch.player2 : currentMatch.player1;
+
+      // Registrar ganador
+      eventManager.recordTournamentWinner(tournament.id, selectedWinner, loser);
+
+      // Anunciar resultado en el canal
+      await interaction.channel.send({
+        content: `🏆 **Resultado del Torneo**\n<@${selectedWinner}> ha derrotado a <@${loser}> y avanza a la siguiente ronda!`
+      });
+
+      // Mostrar bracket actualizado
+      const bracketEmbed = eventManager.generateBracketEmbed(tournament.id, interaction.client);
+      await interaction.channel.send({
+        content: '📊 **Bracket Actualizado:**',
+        embeds: [bracketEmbed]
+      });
+
+      // Verificar si se avanzó a nueva ronda
+      const updatedTournament = eventManager.getEvent(tournament.id);
+      const updatedBracket = updatedTournament.metadata.bracket;
+      const updatedCurrentRound = Math.max(...updatedBracket.map(m => m.round));
+
+      // Si la ronda cambió, anunciar nueva ronda
+      if (updatedCurrentRound > currentRound) {
+        const newRoundMatches = updatedBracket.filter(m => m.round === updatedCurrentRound && !m.winner && m.player2);
+
+        if (newRoundMatches.length > 0) {
+          await interaction.channel.send({
+            content: `\n🎊 **¡NUEVA RONDA INICIADA!** 🎊\n**Ronda ${updatedCurrentRound}** del torneo **${updatedTournament.name}**\n\n**Combates de esta ronda:**`
+          });
+
+          // Anunciar cada combate con embed visual
+          for (const match of newRoundMatches) {
+            const p1Data = dataManager.getUser(match.player1, guildId);
+            const p2Data = dataManager.getUser(match.player2, guildId);
+            const matchEmbed = eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client);
+
+            await interaction.channel.send({ embeds: [matchEmbed] });
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+      }
+
+      // Actualizar mensaje de control con el siguiente combate
+      const newControlData = eventManager.generateTournamentControlMessage(tournament.id, interaction.client);
+
+      if (newControlData) {
+        await interaction.message.edit({
+          embeds: [newControlData.embed],
+          components: newControlData.components
+        });
+      }
+
+      console.log(`✅ Resultado registrado: ${selectedWinner} ganó en torneo ${tournament.id}`);
+    } catch (error) {
+      console.error('Error manejando selección del torneo:', error);
+      await interaction.followUp({
+        content: `${EMOJIS.ERROR} Error al procesar la selección: ${error.message}`,
+        flags: MessageFlags.Ephemeral
+      }).catch(() => {});
+    }
+
+    return; // Terminar aquí para evitar el procesamiento de comandos
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName } = interaction;
@@ -1507,7 +1626,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   // Comandos que NO requieren estar en el canal de comandos
-  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas', 'arena', 'entrenar', 'equipar'];
+  const excludedCommands = ['traducir', 'hablar', 'join', 'salir', 'help', 'testwelcome', 'borrarmsg', 'deshacerborrado', 'tienda', 'duelo', 'arena', 'torneo', 'sabiduria', 'fortuna', 'perfil', 'ayudamusica', 'helpmusic', 'personalizar', 'logros', 'achievements', 'medallas'];
 
   // Verificar si el comando debe ejecutarse en un canal específico
   // (excluir comandos de música y achievements ya que tienen su propia verificación)
@@ -1640,7 +1759,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // ========== COMBATE Y JUEGOS ==========
           {
             name: `${EMOJIS.DUEL} __COMBATE Y JUEGOS__`,
-            value: `⚔️ \`/duelo @usuario\` - Desafía a un duelo de honor\n📜 \`/sabiduria\` - Citas de maestros samurai\n🎴 \`/fortuna\` - Omikuji (fortuna diaria)\n👤 \`/perfil [@usuario]\` - Ver perfil completo de guerrero\n📍 *${combatChannelName}*`,
+            value: `⚔️ \`/duelo @usuario\` - Desafía a un duelo de honor\n🏟️ \`/arena [dificultad]\` - Combate vs IA en la arena\n💪 \`/entrenar [tipo]\` - Mejora tus stats de combate\n📦 \`/tienda inventario\` - Ver tu inventario de items\n📍 *${combatChannelName}*`,
+            inline: false
+          },
+          {
+            name: `${EMOJIS.DUEL} __COMBATE Y JUEGOS (CONT.)__`,
+            value: `📜 \`/sabiduria\` - Citas de maestros samurai\n🎴 \`/fortuna\` - Omikuji (fortuna diaria)\n👤 \`/perfil [@usuario]\` - Ver perfil completo de guerrero\n📍 *${combatChannelName}*`,
             inline: false
           },
           // ========== PERSONALIZACIÓN ==========
@@ -5364,14 +5488,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     // /logros, /achievements, /medallas - Mostrar logros del usuario
     else if (commandName === 'logros' || commandName === 'achievements' || commandName === 'medallas') {
-      // Verificar que el comando se ejecute en un servidor
-      if (!interaction.guild) {
-        return interaction.reply({
-          content: `${EMOJIS.ERROR} Este comando solo puede ser usado en un servidor.`,
-          ephemeral: true
-        });
-      }
-
       const userId = interaction.user.id;
       const guildId = interaction.guild.id;
 
@@ -5885,7 +6001,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
             .setTimestamp();
 
-          await interaction.reply({ embeds: [embed] });
+          const message = await interaction.reply({ embeds: [embed], fetchReply: true });
+
+          // Guardar messageId y channelId para poder actualizar el embed cuando se unan participantes
+          event.metadata.announcementMessageId = message.id;
+          event.metadata.announcementChannelId = interaction.channel.id;
+          eventManager.saveEvents();
+
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} creó evento: ${event.name}`);
         } catch (error) {
           console.error('Error creando evento:', error.message);
@@ -5954,6 +6076,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // Create collector for event selection
           const collector = response.createMessageComponentCollector({
             componentType: ComponentType.StringSelect,
+            filter: (i) => i.user.id === userId, // Solo el usuario que ejecutó el comando puede interactuar
             time: 300000 // 5 minutos
           });
 
@@ -5996,6 +6119,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
                   await i.update({ embeds: [successEmbed], components: [] });
                   console.log(`${EMOJIS.SUCCESS} ${i.user.tag} se unió al evento: ${event.name}`);
+
+                  // Actualizar mensaje de anuncio del evento
+                  if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+                    try {
+                      const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+                      const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+                      const updatedEmbed = new EmbedBuilder()
+                        .setColor(COLORS.SUCCESS)
+                        .setTitle(`${event.emoji} Evento Creado`)
+                        .setDescription(
+                          `**${event.name}**\n` +
+                          `${event.description}\n\n` +
+                          `**ID:** \`${event.id}\`\n` +
+                          `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                          `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
+                          `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                          `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                          `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                        )
+                        .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                        .setTimestamp();
+
+                      await announcementMessage.edit({ embeds: [updatedEmbed] });
+                    } catch (err) {
+                      console.error('Error actualizando mensaje de anuncio del evento:', err.message);
+                    }
+                  }
+
                   collector.stop('completed');
                 } catch (error) {
                   await i.update({
@@ -6008,10 +6160,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
               }
             } catch (error) {
               console.error(`❌ Error procesando selección de evento:`, error);
-              await i.reply({
-                content: `${EMOJIS.ERROR} Hubo un error al unirte al evento. Intenta de nuevo.`,
-                flags: MessageFlags.Ephemeral
-              });
+              // Verificar si la interacción ya fue respondida
+              if (i.replied || i.deferred) {
+                await i.followUp({
+                  content: `${EMOJIS.ERROR} Hubo un error al unirte al evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              } else {
+                await i.reply({
+                  content: `${EMOJIS.ERROR} Hubo un error al unirte al evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              }
             }
           });
 
@@ -6030,12 +6190,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos pending o active (ignorar cancelled/completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              (e.status === EVENT_STATUS.PENDING || e.status === EVENT_STATUS.ACTIVE)
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" disponible para unirse.`,
               flags: MessageFlags.Ephemeral
             });
           }
@@ -6063,6 +6227,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await interaction.reply({ embeds: [embed] });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} se unió al evento: ${event.name}`);
+
+          // Actualizar mensaje de anuncio del evento
+          if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+            try {
+              const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+              const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+              const updatedEmbed = new EmbedBuilder()
+                .setColor(COLORS.SUCCESS)
+                .setTitle(`${event.emoji} Evento Creado`)
+                .setDescription(
+                  `**${event.name}**\n` +
+                  `${event.description}\n\n` +
+                  `**ID:** \`${event.id}\`\n` +
+                  `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                  `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
+                  `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                  `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                  `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                )
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              await announcementMessage.edit({ embeds: [updatedEmbed] });
+            } catch (err) {
+              console.error('Error actualizando mensaje de anuncio del evento:', err.message);
+            }
+          }
         } catch (error) {
           console.error('Error uniéndose a evento:', error.message);
           return interaction.reply({
@@ -6126,6 +6318,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // Create collector for event selection
           const collector = response.createMessageComponentCollector({
             componentType: ComponentType.StringSelect,
+            filter: (i) => i.user.id === userId, // Solo el usuario que ejecutó el comando puede interactuar
             time: 300000 // 5 minutos
           });
 
@@ -6154,6 +6347,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   });
 
                   console.log(`${EMOJIS.VOICE} ${i.user.tag} salió del evento: ${event.name}`);
+
+                  // Actualizar mensaje de anuncio del evento
+                  if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+                    try {
+                      const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+                      const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+                      const updatedEmbed = new EmbedBuilder()
+                        .setColor(COLORS.SUCCESS)
+                        .setTitle(`${event.emoji} Evento Creado`)
+                        .setDescription(
+                          `**${event.name}**\n` +
+                          `${event.description}\n\n` +
+                          `**ID:** \`${event.id}\`\n` +
+                          `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                          `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
+                          `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                          `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                          `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                        )
+                        .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                        .setTimestamp();
+
+                      await announcementMessage.edit({ embeds: [updatedEmbed] });
+                    } catch (err) {
+                      console.error('Error actualizando mensaje de anuncio del evento:', err.message);
+                    }
+                  }
+
                   collector.stop('completed');
                 } catch (error) {
                   await i.update({
@@ -6166,10 +6388,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
               }
             } catch (error) {
               console.error(`❌ Error procesando salida de evento:`, error);
-              await i.reply({
-                content: `${EMOJIS.ERROR} Hubo un error al salir del evento. Intenta de nuevo.`,
-                flags: MessageFlags.Ephemeral
-              });
+              // Verificar si la interacción ya fue respondida
+              if (i.replied || i.deferred) {
+                await i.followUp({
+                  content: `${EMOJIS.ERROR} Hubo un error al salir del evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              } else {
+                await i.reply({
+                  content: `${EMOJIS.ERROR} Hubo un error al salir del evento. Intenta de nuevo.`,
+                  flags: MessageFlags.Ephemeral
+                });
+              }
             }
           });
 
@@ -6187,12 +6417,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos pending (no se puede salir de eventos activos, cancelled o completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              e.status === EVENT_STATUS.PENDING
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" en estado pendiente.`,
               flags: MessageFlags.Ephemeral
             });
           }
@@ -6205,6 +6439,34 @@ client.on(Events.InteractionCreate, async (interaction) => {
           });
 
           console.log(`${EMOJIS.VOICE} ${interaction.user.tag} salió del evento: ${event.name}`);
+
+          // Actualizar mensaje de anuncio del evento
+          if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+            try {
+              const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+              const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+              const updatedEmbed = new EmbedBuilder()
+                .setColor(COLORS.SUCCESS)
+                .setTitle(`${event.emoji} Evento Creado`)
+                .setDescription(
+                  `**${event.name}**\n` +
+                  `${event.description}\n\n` +
+                  `**ID:** \`${event.id}\`\n` +
+                  `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                  `**Estado:** ${event.status === EVENT_STATUS.PENDING ? '⏳ Pendiente' : '▶️ Activo'}\n` +
+                  `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                  `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                  `Usa \`/evento unirse evento:${event.name}\` para inscribirte.`
+                )
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              await announcementMessage.edit({ embeds: [updatedEmbed] });
+            } catch (err) {
+              console.error('Error actualizando mensaje de anuncio del evento:', err.message);
+            }
+          }
         } catch (error) {
           console.error('Error saliendo de evento:', error.message);
           return interaction.reply({
@@ -6471,15 +6733,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos pending (ignorar cancelled/completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              e.status === EVENT_STATUS.PENDING
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" en estado pendiente.`,
               flags: MessageFlags.Ephemeral
             });
           }
+
+          // Verificar estado del evento antes de iniciar (para debugging)
+          console.log(`🔍 Intentando iniciar evento "${event.name}" (ID: ${event.id}, Estado: ${event.status}, Participantes: ${event.participants.length})`);
 
           eventManager.startEvent(event.id);
 
@@ -6496,6 +6765,101 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
           await interaction.reply({ embeds: [embed] });
           console.log(`${EMOJIS.SUCCESS} ${interaction.user.tag} inició evento: ${event.name}`);
+
+          // Actualizar mensaje de anuncio del evento (cambiar estado a Activo)
+          if (event.metadata.announcementMessageId && event.metadata.announcementChannelId) {
+            try {
+              const channel = await interaction.client.channels.fetch(event.metadata.announcementChannelId);
+              const announcementMessage = await channel.messages.fetch(event.metadata.announcementMessageId);
+
+              const updatedEmbed = new EmbedBuilder()
+                .setColor(COLORS.SUCCESS)
+                .setTitle(`${event.emoji} Evento Creado`)
+                .setDescription(
+                  `**${event.name}**\n` +
+                  `${event.description}\n\n` +
+                  `**ID:** \`${event.id}\`\n` +
+                  `**Tipo:** ${event.emoji} ${event.type.replace('_', ' ')}\n` +
+                  `**Estado:** ▶️ Activo\n` +
+                  `**Duración:** ${Math.floor((event.endTime - event.startTime) / (60 * 60 * 1000))} horas\n` +
+                  `**Participantes:** ${event.participants.length}/${event.maxParticipants}\n\n` +
+                  `¡El evento ha comenzado! Usa \`/evento ver evento:${event.name}\` para más detalles.`
+                )
+                .setFooter({ text: MESSAGES.FOOTER.DEFAULT })
+                .setTimestamp();
+
+              await announcementMessage.edit({ embeds: [updatedEmbed] });
+            } catch (err) {
+              console.error('Error actualizando mensaje de anuncio del evento al iniciar:', err.message);
+            }
+          }
+
+          // Si es un torneo, anunciar los combates de la primera ronda
+          if (event.type === 'duel_tournament' && event.metadata.bracket) {
+            const bracket = event.metadata.bracket;
+            const firstRoundMatches = bracket.filter(m => m.round === 1);
+
+            if (firstRoundMatches.length > 0) {
+              // Anunciar inicio del torneo
+              await interaction.channel.send({
+                content: `\n⚔️ **¡TORNEO INICIADO!** ⚔️\n` +
+                  `**${event.name}**\n\n` +
+                  `**Participantes:** ${event.participants.length}\n` +
+                  `**Ronda 1 - Combates:**`
+              });
+
+              // Anunciar cada combate de la primera ronda
+              for (const match of firstRoundMatches) {
+                if (!match.player2) {
+                  // BYE - anunciar pase automático
+                  await interaction.channel.send({
+                    content: `🎫 <@${match.player1}> pasa automáticamente a la siguiente ronda (BYE)`
+                  });
+                  continue;
+                }
+
+                // Obtener datos de ambos jugadores
+                const p1Data = dataManager.getUser(match.player1, guildId);
+                const p2Data = dataManager.getUser(match.player2, guildId);
+
+                // Generar embed VS
+                const matchEmbed = eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client);
+                matchEmbed.setFooter({ text: `${event.name} | Ronda ${match.round}` });
+
+                await interaction.channel.send({ embeds: [matchEmbed] });
+
+                // Pequeño delay para evitar rate limit
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+
+              // Mostrar bracket inicial completo
+              const initialBracketEmbed = eventManager.generateBracketEmbed(event.id, interaction.client);
+              await interaction.channel.send({
+                content: '📊 **Bracket del Torneo:**',
+                embeds: [initialBracketEmbed]
+              });
+
+              // Crear mensaje de control persistente (solo visible para creador/admin)
+              await interaction.channel.send({
+                content: `\n${'─'.repeat(50)}\n🎮 **PANEL DE CONTROL DEL TORNEO** 🎮\n${'─'.repeat(50)}`
+              });
+
+              const controlData = eventManager.generateTournamentControlMessage(event.id, interaction.client);
+              if (controlData && controlData.match) {
+                const controlMessage = await interaction.channel.send({
+                  embeds: [controlData.embed],
+                  components: controlData.components
+                });
+
+                // Guardar messageId y channelId en metadata
+                event.metadata.controlMessageId = controlMessage.id;
+                event.metadata.controlChannelId = interaction.channel.id;
+                eventManager.saveEvents();
+
+                console.log(`✅ Mensaje de control creado: ${controlMessage.id} para torneo ${event.id}`);
+              }
+            }
+          }
         } catch (error) {
           console.error('Error iniciando evento:', error.message);
           return interaction.reply({
@@ -6557,12 +6921,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: 'También puedes usar: /evento finalizar evento:nombre' })
             .setTimestamp();
 
-          const response = await interaction.reply({
+          await interaction.reply({
             embeds: [embed],
             components: [row],
-            flags: MessageFlags.Ephemeral,
-            fetchReply: true
+            flags: MessageFlags.Ephemeral
           });
+
+          const response = await interaction.fetchReply();
 
           // Create collector for event selection
           const collector = response.createMessageComponentCollector({
@@ -6579,6 +6944,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 if (!event) {
                   return i.update({
                     content: `${EMOJIS.ERROR} Evento no encontrado.`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
+                // Verificar que el evento esté activo antes de finalizar
+                if (event.status !== 'active') {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} Solo se pueden finalizar eventos activos. Estado actual: ${event.status}`,
                     embeds: [],
                     components: []
                   });
@@ -6631,11 +7005,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
               }
             } catch (error) {
               console.error(`❌ Error procesando finalización de evento:`, error);
-              await i.update({
-                content: `${EMOJIS.ERROR} Hubo un error al finalizar el evento. Intenta de nuevo.`,
-                embeds: [],
-                components: []
-              });
+              // Si ya se hizo defer, usar editReply; si no, usar update
+              if (i.deferred) {
+                await i.editReply({
+                  content: `${EMOJIS.ERROR} Hubo un error al finalizar el evento: ${error.message}`,
+                  embeds: [],
+                  components: []
+                }).catch(() => {});
+              } else {
+                await i.update({
+                  content: `${EMOJIS.ERROR} Hubo un error al finalizar el evento: ${error.message}`,
+                  embeds: [],
+                  components: []
+                }).catch(() => {});
+              }
             }
           });
 
@@ -6653,12 +7036,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos active (no se puede finalizar pending, cancelled o completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              e.status === EVENT_STATUS.ACTIVE
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" en estado activo.`,
               flags: MessageFlags.Ephemeral
             });
           }
@@ -6766,12 +7153,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setFooter({ text: 'También puedes usar: /evento cancelar evento:nombre' })
             .setTimestamp();
 
-          const response = await interaction.reply({
+          await interaction.reply({
             embeds: [embed],
             components: [row],
-            flags: MessageFlags.Ephemeral,
-            fetchReply: true
+            flags: MessageFlags.Ephemeral
           });
+
+          const response = await interaction.fetchReply();
 
           // Create collector for event selection
           const collector = response.createMessageComponentCollector({
@@ -6807,11 +7195,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
               }
             } catch (error) {
               console.error(`❌ Error procesando cancelación de evento:`, error);
+              // Usar update ya que no se hace defer en este flujo
               await i.update({
                 content: `${EMOJIS.ERROR} ${error.message}`,
                 embeds: [],
                 components: []
-              });
+              }).catch(() => {});
             }
           });
 
@@ -6829,12 +7218,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           let event = eventManager.getEvent(eventoQuery);
           if (!event) {
             const guildEvents = eventManager.getGuildEvents(guildId);
-            event = guildEvents.find(e => e.name.toLowerCase() === eventoQuery.toLowerCase());
+            // Solo buscar en eventos pending o active (no se puede cancelar eventos ya cancelled/completed)
+            event = guildEvents.find(e =>
+              e.name.toLowerCase() === eventoQuery.toLowerCase() &&
+              (e.status === EVENT_STATUS.PENDING || e.status === EVENT_STATUS.ACTIVE)
+            );
           }
 
           if (!event) {
             return interaction.reply({
-              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}".`,
+              content: `${EMOJIS.ERROR} No se encontró el evento "${eventoQuery}" disponible para cancelar.`,
               flags: MessageFlags.Ephemeral
             });
           }
@@ -9070,10 +9463,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
           // Establecer cooldown
           dataManager.setCooldown(userId, 'arena', CONSTANTS.ARENA.COOLDOWN);
 
-          // Agregar username al userData para el combate
-          userData.username = interaction.user.username;
-          userData.userId = userId;
-
           // Crear combate vs IA
           const combatManager = require('./utils/combatManager');
           const duelId = combatManager.createArenaBattle(userData, selectedDifficulty);
@@ -9114,14 +9503,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
             }
 
             const updatedDuel = combatManager.getDuel(duelId);
-
-            // Verificar que el duelo aún existe
-            if (!updatedDuel) {
-              return btnInteraction.followUp({
-                content: '❌ El combate ha finalizado o expiró.',
-                flags: MessageFlags.Ephemeral
-              });
-            }
 
             if (result.gameOver) {
               const finalEmbed = combatManager.generateCombatEmbed(updatedDuel);
@@ -9166,6 +9547,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
               return;
             }
 
+            // Mostrar resultado del ataque del jugador
+            const updatedEmbed = combatManager.generateCombatEmbed(updatedDuel);
+            updatedEmbed.addFields({
+              name: '⚔️ Tu acción',
+              value: result.message,
+              inline: false
+            });
+
             // Turno de la IA (con delay de 2 segundos para dar tiempo al jugador)
             await new Promise(resolve => setTimeout(resolve, 2000));
 
@@ -9174,16 +9563,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             const duelAfterAI = combatManager.getDuel(duelId);
 
-            // Verificar que el duelo aún existe después del turno de IA
-            if (!duelAfterAI) {
-              return btnInteraction.followUp({
-                content: '❌ El combate ha finalizado.',
-                flags: MessageFlags.Ephemeral
-              });
-            }
-
             if (aiResult.gameOver) {
               const finalEmbed = combatManager.generateCombatEmbed(duelAfterAI);
+              finalEmbed.addFields({
+                name: '⚔️ Tu acción',
+                value: result.message,
+                inline: false
+              });
+              finalEmbed.addFields({
+                name: '🤖 Acción del oponente',
+                value: aiResult.message,
+                inline: false
+              });
               finalEmbed.addFields({
                 name: aiResult.winner === 'challenger' ? '🎉 ¡VICTORIA!' : '💀 DERROTA',
                 value: aiResult.reason,
@@ -9225,9 +9616,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
               return;
             }
 
-            const updatedEmbed = combatManager.generateCombatEmbed(duelAfterAI);
+            // Mostrar resultado del ataque de la IA
+            const finalUpdatedEmbed = combatManager.generateCombatEmbed(duelAfterAI);
+            finalUpdatedEmbed.addFields({
+              name: '⚔️ Tu acción',
+              value: result.message,
+              inline: false
+            });
+            finalUpdatedEmbed.addFields({
+              name: '🤖 Acción del oponente',
+              value: aiResult.message,
+              inline: false
+            });
+
             const updatedButtons = combatManager.generateCombatButtons(duelAfterAI.challenger);
-            await btnInteraction.editReply({ embeds: [updatedEmbed], components: updatedButtons });
+            await btnInteraction.editReply({ embeds: [finalUpdatedEmbed], components: updatedButtons });
           });
 
           combatCollector.on('end', async (collected, reason) => {
@@ -9347,10 +9750,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       // Establecer cooldown
       dataManager.setCooldown(userId, 'arena', CONSTANTS.ARENA.COOLDOWN);
-
-      // Agregar username al userData para el combate
-      userData.username = interaction.user.username;
-      userData.userId = userId;
 
       // Crear combate vs IA
       const combatManager = require('./utils/combatManager');
@@ -9529,15 +9928,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         // Continuar combate - actualizar estado
         const updatedDuel = combatManager.getDuel(duelId);
-
-        // Verificar que el duelo aún existe
-        if (!updatedDuel) {
-          return buttonInteraction.update({
-            content: '❌ El combate ha finalizado.',
-            components: []
-          });
-        }
-
         const updatedEmbed = combatManager.generateCombatEmbed(updatedDuel);
         const updatedButtons = combatManager.generateCombatButtons(updatedDuel.challenger);
 
@@ -9560,6 +9950,107 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
         }
       });
+    }
+
+    // ==================== SISTEMA DE TORNEOS PVP ====================
+
+    else if (commandName === 'torneo') {
+      // Verificar que el comando se use en el canal correcto
+      const tournamentChannelId = '1440375233147047987';
+      if (interaction.channel.id !== tournamentChannelId) {
+        return interaction.reply({
+          content: `❌ El comando \`/torneo\` solo puede usarse en <#${tournamentChannelId}>.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
+      const subcommand = interaction.options.getSubcommand();
+      const userId = interaction.user.id;
+      const guildId = interaction.guild.id;
+
+      // Obtener evento activo de tipo DUEL_TOURNAMENT
+      const eventManager = require('./utils/eventManager');
+      const activeEvents = eventManager.getActiveEvents(guildId);
+      const activeTournament = activeEvents.find(e => e.type === 'duel_tournament');
+
+      if (subcommand === 'bracket') {
+        if (!activeTournament) {
+          return interaction.reply({
+            content: '❌ No hay ningún torneo activo en este momento.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        try {
+          // Usar la nueva función de bracket visual
+          const bracketEmbed = eventManager.generateBracketEmbed(activeTournament.eventId, interaction.client);
+          return interaction.reply({ embeds: [bracketEmbed] });
+        } catch (error) {
+          console.error('Error al obtener bracket del torneo:', error);
+          return interaction.reply({
+            content: `❌ Error al obtener el bracket: ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      else if (subcommand === 'micombate') {
+        if (!activeTournament) {
+          return interaction.reply({
+            content: '❌ No hay ningún torneo activo en este momento.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        // Verificar que el usuario está participando
+        if (!activeTournament.participants.includes(userId)) {
+          return interaction.reply({
+            content: '❌ No estás participando en el torneo actual.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+
+        try {
+          const match = eventManager.getUserTournamentMatch(activeTournament.eventId, userId);
+
+          if (!match) {
+            return interaction.reply({
+              content: '⏳ No tienes combates pendientes en este momento. Espera a que termine la ronda actual.',
+              flags: MessageFlags.Ephemeral
+            });
+          }
+
+          // Obtener datos de ambos jugadores para el embed VS
+          const player1Data = dataManager.getUser(match.player1, guildId);
+          const player2Data = match.player2 ? dataManager.getUser(match.player2, guildId) : null;
+
+          // Generar embed visual de VS
+          const vsEmbed = eventManager.generateMatchVSEmbed(match, player1Data, player2Data, interaction.client);
+
+          // Agregar información sobre cómo registrar resultado
+          vsEmbed.addFields({
+            name: '📝 Cómo Registrar el Resultado',
+            value:
+              `**1.** Completa tu combate contra tu oponente\n` +
+              `**2.** Usa \`/torneo registrar\` para registrar el resultado\n` +
+              `**3.** Ambos jugadores deben confirmar el ganador\n\n` +
+              `🏆 El ganador avanza a la siguiente ronda`,
+            inline: false
+          });
+
+          vsEmbed.setFooter({ text: `Torneo: ${activeTournament.name} | Ronda ${match.round}` });
+
+          return interaction.reply({ embeds: [vsEmbed], flags: MessageFlags.Ephemeral });
+        } catch (error) {
+          console.error('Error al obtener combate del usuario:', error);
+          return interaction.reply({
+            content: `❌ Error: ${error.message}`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      }
+
+      // Subcomando 'registrar' removido - ahora se usa el Panel de Control automático
     }
 
     // ==================== SISTEMA DE ENTRENAMIENTOS ====================

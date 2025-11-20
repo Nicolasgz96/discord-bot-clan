@@ -954,7 +954,23 @@ const commands = [
         )
     ),
 
-  // SISTEMA DE ARENA (COMBATE VS IA)
+  // ==================== SISTEMA DE TORNEOS PVP ====================
+  new SlashCommandBuilder()
+    .setName('torneo')
+    .setDescription('🏆 Sistema de torneos PvP - Compite en brackets eliminatorios')
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('bracket')
+        .setDescription('📊 Ver bracket del torneo activo')
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('micombate')
+        .setDescription('⚔️ Ver tu combate pendiente en el torneo')
+    ),
+  // Nota: El subcomando 'registrar' fue removido - ahora se usa el Panel de Control automático
+
+  // ==================== SISTEMA DE COMBATE ====================
   new SlashCommandBuilder()
     .setName('arena')
     .setDescription('⚔️ Entra a la Arena Samurái y combate contra guerreros IA')
@@ -971,7 +987,6 @@ const commands = [
         )
     ),
 
-  // SISTEMA DE ENTRENAMIENTOS
   new SlashCommandBuilder()
     .setName('entrenar')
     .setDescription('💪 Entrena tus stats de combate permanentemente')
@@ -988,7 +1003,6 @@ const commands = [
         )
     ),
 
-  // SISTEMA DE EQUIPAMIENTO
   new SlashCommandBuilder()
     .setName('equipar')
     .setDescription('⚔️ Equipa o desequipa armas y armaduras')
@@ -1008,6 +1022,10 @@ const commands = [
         .setDescription('Item a equipar (deja vacío para ver opciones)')
         .setRequired(false)
     ),
+
+  new SlashCommandBuilder()
+    .setName('inventario')
+    .setDescription('🎒 Ver tu inventario de combate (armas, armaduras, stats)'),
 ];
 
 module.exports = commands;
