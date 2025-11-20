@@ -7576,13 +7576,35 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   });
                 }
 
+                // Filtrar la construcción del usuario que está votando para evitar confusiones
+                const voterId = i.user.id;
+                const submissionsToShow = submissions.filter(([submissionUserId]) => submissionUserId !== voterId);
+
+                if (submissionsToShow.length === 0) {
+                  return i.update({
+                    content: `${EMOJIS.ERROR} No hay otras construcciones para votar (solo existe la tuya).`,
+                    embeds: [],
+                    components: []
+                  });
+                }
+
                 // Create embeds showing all submissions with images (SIN mostrar votos)
-                const submissionEmbeds = await Promise.all(submissions.map(async ([submissionUserId, submission], index) => {
+                const submissionEmbeds = await Promise.all(submissionsToShow.map(async ([submissionUserId, submission], index) => {
                   try {
                     const user = await interaction.client.users.fetch(submissionUserId);
+                    // Obtener displayName del servidor
+                    let displayName = user.username;
+                    try {
+                      const guild = await interaction.client.guilds.fetch(guildId);
+                      const member = await guild.members.fetch(submissionUserId);
+                      displayName = member.displayName;
+                    } catch (err) {
+                      console.log(`⚠️ No se pudo obtener displayName de ${submissionUserId}: ${err.message}`);
+                    }
+
                     const embed = new EmbedBuilder()
                       .setColor(COLORS.PRIMARY)
-                      .setAuthor({ name: `${index + 1}. ${user.username}`, iconURL: user.displayAvatarURL() })
+                      .setAuthor({ name: `${index + 1}. ${displayName}`, iconURL: user.displayAvatarURL() })
                       .setDescription(
                         `**Descripción:**\n${submission.description || 'Sin descripción'}`
                       )
@@ -7602,12 +7624,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   }
                 }));
 
-                // Create dropdown for user submissions (SIN mostrar votos)
-                const userOptions = await Promise.all(submissions.map(async ([submissionUserId, submission], index) => {
+                // Create dropdown for user submissions (SIN mostrar votos, SIN construcción propia)
+                const userOptions = await Promise.all(submissionsToShow.map(async ([submissionUserId, submission], index) => {
                   try {
                     const user = await interaction.client.users.fetch(submissionUserId);
+                    // Obtener displayName del servidor
+                    let displayName = user.username;
+                    try {
+                      const guild = await interaction.client.guilds.fetch(guildId);
+                      const member = await guild.members.fetch(submissionUserId);
+                      displayName = member.displayName;
+                    } catch (err) {
+                      console.log(`⚠️ No se pudo obtener displayName de ${submissionUserId}: ${err.message}`);
+                    }
+
                     return new StringSelectMenuOptionBuilder()
-                      .setLabel(`${index + 1}. ${user.username}`.substring(0, 100))
+                      .setLabel(`${index + 1}. ${displayName}`.substring(0, 100))
                       .setDescription(`Construcción #${index + 1}`.substring(0, 100))
                       .setValue(submissionUserId)
                       .setEmoji('🗳️');
@@ -7633,7 +7665,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   .setTitle(`🗳️ ${event.name}`)
                   .setDescription(
                     `**📸 Construcciones Enviadas**\n\n` +
-                    `Revisa las ${submissions.length} construcciones abajo y selecciona tu favorita del menú.\n\n` +
+                    `Revisa las ${submissionsToShow.length} construcciones abajo y selecciona tu favorita del menú.\n\n` +
                     `⚠️ Solo puedes votar una vez por concurso`
                   )
                   .setFooter({ text: 'El menú expira en 5 minutos' })
@@ -7660,14 +7692,23 @@ client.on(Events.InteractionCreate, async (interaction) => {
                   eventManager.voteBuildingEntry(selectedEventId, userId, selectedUserId);
 
                   const votedUser = await interaction.client.users.fetch(selectedUserId);
+                  // Obtener displayName del servidor
+                  let votedDisplayName = votedUser.username;
+                  try {
+                    const guild = await interaction.client.guilds.fetch(guildId);
+                    const member = await guild.members.fetch(selectedUserId);
+                    votedDisplayName = member.displayName;
+                  } catch (err) {
+                    console.log(`⚠️ No se pudo obtener displayName de ${selectedUserId}: ${err.message}`);
+                  }
 
                   await i.update({
-                    content: `${EMOJIS.SUCCESS} Has votado por la construcción de **${votedUser.username}** en **${event.name}**.`,
+                    content: `${EMOJIS.SUCCESS} Has votado por la construcción de **${votedDisplayName}** en **${event.name}**.`,
                     embeds: [],
                     components: []
                   });
 
-                  console.log(`${EMOJIS.SUCCESS} ${i.user.tag} votó por ${votedUser.tag} en: ${event.name}`);
+                  console.log(`${EMOJIS.SUCCESS} ${i.user.tag} votó por ${votedDisplayName} en: ${event.name}`);
                   collector.stop('completed');
                 } catch (error) {
                   await i.update({
