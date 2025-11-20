@@ -1548,7 +1548,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           for (const match of newRoundMatches) {
             const p1Data = dataManager.getUser(match.player1, guildId);
             const p2Data = dataManager.getUser(match.player2, guildId);
-            const matchEmbed = eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client);
+            const matchEmbed = await eventManager.generateMatchVSEmbed(match, p1Data, p2Data, interaction.client, guildId);
 
             await interaction.channel.send({ embeds: [matchEmbed] });
             await new Promise(resolve => setTimeout(resolve, 1000));
