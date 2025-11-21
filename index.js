@@ -5765,6 +5765,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     // /logros, /achievements, /medallas - Mostrar logros del usuario
     else if (commandName === 'logros' || commandName === 'achievements' || commandName === 'medallas') {
+      // Verificar que el comando se use en un servidor
+      if (!interaction.guild) {
+        return interaction.reply({
+          content: `${EMOJIS.ERROR} Este comando solo puede ser usado en un servidor.`,
+          flags: MessageFlags.Ephemeral
+        });
+      }
+
       const userId = interaction.user.id;
       const guildId = interaction.guild.id;
 
