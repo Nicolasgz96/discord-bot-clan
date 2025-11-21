@@ -5908,12 +5908,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         });
       }
 
-      // Check if achievement is restricted to specific user
-      if (achievement.restrictedTo && achievement.restrictedTo !== targetUser.id) {
-        return interaction.reply({
-          content: `${EMOJIS.ERROR} Este logro está restringido a otro usuario específico.`,
-          flags: MessageFlags.Ephemeral
-        });
+      // Check if achievement is restricted to specific user(s)
+      if (achievement.restrictedTo) {
+        const allowedUsers = Array.isArray(achievement.restrictedTo)
+          ? achievement.restrictedTo
+          : [achievement.restrictedTo];
+        if (!allowedUsers.includes(targetUser.id)) {
+          return interaction.reply({
+            content: `${EMOJIS.ERROR} Este logro está restringido a otro usuario específico.`,
+            flags: MessageFlags.Ephemeral
+          });
+        }
       }
 
       // Check if user already has the achievement
