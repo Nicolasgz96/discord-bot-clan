@@ -346,6 +346,20 @@ const ACHIEVEMENTS = {
     hidden: false
   },
 
+  creator: {
+    id: 'creator',
+    name: '創造者',
+    nameEn: 'Creator',
+    description: 'Creador del Demon Hunter Bot',
+    category: 'special',
+    tier: 'legendary',
+    emoji: '⛩️',
+    requirement: { type: 'manual', count: 1 },
+    reward: { koku: 50000, title: '創造者' },
+    hidden: false,
+    restrictedTo: ['331621993860300800', '750509799942127616'] // Solo estos usuarios pueden obtener este logro
+  },
+
   trivia_master: {
     id: 'trivia_master',
     name: 'Maestro de Trivia',
@@ -496,9 +510,14 @@ function checkAchievements(userId, guildId, userData) {
     // Skip if already has it
     if (hasAchievement(userId, guildId, id)) continue;
 
-    // Skip if achievement is restricted to specific user
-    if (achievement.restrictedTo && achievement.restrictedTo !== userId) {
-      continue;
+    // Skip if achievement is restricted to specific user(s)
+    if (achievement.restrictedTo) {
+      const allowedUsers = Array.isArray(achievement.restrictedTo)
+        ? achievement.restrictedTo
+        : [achievement.restrictedTo];
+      if (!allowedUsers.includes(userId)) {
+        continue;
+      }
     }
 
     let meetsRequirement = false;
@@ -576,6 +595,11 @@ function checkAchievements(userId, guildId, userData) {
       case 'invites':
         meetsRequirement = (userData.stats?.invitesCount || 0) >= achievement.requirement.count;
         break;
+
+      case 'manual':
+        // Manual achievements must be granted explicitly via awardAchievement()
+        meetsRequirement = false;
+        break;
     }
 
     if (meetsRequirement) {
@@ -610,8 +634,13 @@ function getUserAchievements(userId, guildId) {
       });
     } else if (!achievement.hidden) {
       // Don't show restricted achievements to other users
-      if (achievement.restrictedTo && achievement.restrictedTo !== userId) {
-        continue;
+      if (achievement.restrictedTo) {
+        const allowedUsers = Array.isArray(achievement.restrictedTo)
+          ? achievement.restrictedTo
+          : [achievement.restrictedTo];
+        if (!allowedUsers.includes(userId)) {
+          continue;
+        }
       }
       locked.push(achievement);
     }
