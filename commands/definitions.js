@@ -708,7 +708,8 @@ const commands = [
         .setRequired(true)
         .addChoices(
           { name: '👑 DIOS (Exclusivo)', value: 'god_status' },
-          { name: '⛓️ El Esclavizador (Exclusivo)', value: 'recruiter' }
+          { name: '⛓️ El Esclavizador (Exclusivo)', value: 'recruiter' },
+          { name: '⛩️ 創造者 Creador (Exclusivo)', value: 'creator' }
         )
     ),
 

@@ -346,20 +346,6 @@ const ACHIEVEMENTS = {
     hidden: false
   },
 
-  creator: {
-    id: 'creator',
-    name: '創造者',
-    nameEn: 'Creator',
-    description: 'Creador del Demon Hunter Bot',
-    category: 'special',
-    tier: 'legendary',
-    emoji: '⛩️',
-    requirement: { type: 'manual', count: 1 },
-    reward: { koku: 50000, title: '創造者' },
-    hidden: false,
-    restrictedTo: ['331621993860300800', '750509799942127616'] // Solo estos usuarios pueden obtener este logro
-  },
-
   trivia_master: {
     id: 'trivia_master',
     name: 'Maestro de Trivia',
@@ -428,6 +414,20 @@ const ACHIEVEMENTS = {
     reward: { koku: 10000, title: 'DIOS' },
     hidden: true,
     restrictedTo: '402345019584937984' // Usuario exclusivo
+  },
+
+  creator: {
+    id: 'creator',
+    name: '創造者',
+    nameEn: 'Creator',
+    description: 'Creador del Demon Hunter Bot - Exclusivo',
+    category: 'special',
+    tier: 'legendary',
+    emoji: '⛩️',
+    requirement: { type: 'special', value: 'creator_granted' },
+    reward: { koku: 50000, title: '創造者' },
+    hidden: true,
+    restrictedTo: ['331621993860300800', '750509799942127616'] // Usuarios exclusivos
   }
 };
 
