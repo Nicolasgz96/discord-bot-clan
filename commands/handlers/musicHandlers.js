@@ -49,7 +49,7 @@ async function handlePlay(interaction) {
     await interaction.editReply(MESSAGES.MUSIC.SEARCHING);
 
     // Detectar si es una URL o una búsqueda por texto
-    const isUrl = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|spotify\.com|soundcloud\.com)/.test(query);
+    const isUrl = /^(https?:\/\/)?(www\.|open\.)?(youtube\.com|youtu\.be|spotify\.com|soundcloud\.com)/.test(query);
 
     const songs = await musicManager.searchSongs(query, {
       limit: isUrl ? undefined : CONSTANTS.MUSIC.SEARCH_RESULTS_LIMIT
@@ -258,57 +258,7 @@ async function handlePlay(interaction) {
       return; // Salir después de configurar el collector
     }
 
-    // Si es una playlist de URL (más de una canción de URL)
-    if (isUrl && songs.length > 1) {
-      // Verificar límite de cola
-      if (queue.songs.length + songs.length > CONSTANTS.MUSIC.MAX_QUEUE_SIZE) {
-        return interaction.editReply(MESSAGES.MUSIC.QUEUE_FULL(CONSTANTS.MUSIC.MAX_QUEUE_SIZE));
-      }
-
-      // Agregar requestedBy a cada canción
-      songs.forEach(song => {
-        song.requestedBy = interaction.user.id;
-      });
-
-      queue.addSongs(songs);
-
-      const wasPlaying = queue.isPlaying;
-
-      // Si no estaba conectado, conectar
-      if (!queue.connection) {
-        queue.connection = await musicManager.connectToChannel(voiceChannel);
-        queue.voiceChannel = voiceChannel;
-        queue.textChannel = interaction.channel;
-
-        musicManager.setupConnectionListeners(queue.connection, interaction.guild.id);
-      }
-
-      // Si no tenía player, crear uno
-      if (!queue.player) {
-        queue.player = createAudioPlayer();
-        queue.connection.subscribe(queue.player);
-        musicManager.setupPlayerListeners(queue);
-      }
-
-      // Si no estaba reproduciendo, empezar
-      if (!wasPlaying) {
-        musicManager.playSong(queue);
-      }
-
-      // Actualizar mensaje de la cola si existe
-      if (queue.queueMessageId) {
-        await musicManager.updateQueueMessage(queue);
-      }
-
-      // Si hay panel, no enviar mensaje normal (el panel se actualiza automáticamente)
-      if (queue.panelMessageId) {
-        return interaction.deleteReply().catch(() => {});
-      }
-
-      return interaction.editReply(MESSAGES.MUSIC.PLAYLIST_ADDED(songs.length));
-    }
-
-    // Una sola canción
+    // Una sola canción (URL individual o primer resultado de búsqueda)
     const song = songs[0];
     song.requestedBy = interaction.user.id;
 
