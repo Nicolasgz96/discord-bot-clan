@@ -52,6 +52,64 @@ try {
 
 // ==================== SPOTIFY SUPPORT ====================
 
+// Configuración de Spotify API
+const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+
+// Cache de access token (expira en 1 hora)
+let spotifyAccessToken = null;
+let spotifyTokenExpiry = 0;
+
+/**
+ * Obtiene un access token de Spotify usando Client Credentials Flow
+ * @returns {Promise<string>} Access token
+ */
+async function getSpotifyAccessToken() {
+  // Si ya tenemos un token válido, retornarlo
+  if (spotifyAccessToken && Date.now() < spotifyTokenExpiry) {
+    return spotifyAccessToken;
+  }
+
+  // Verificar que las credenciales estén configuradas
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
+    throw new Error(
+      'Credenciales de Spotify no configuradas. ' +
+      'Por favor agrega SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET a tu archivo .env'
+    );
+  }
+
+  try {
+    console.log('🔑 [Spotify] Obteniendo nuevo access token...');
+
+    const authString = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
+
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${authString}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: 'grant_type=client_credentials'
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Spotify Auth failed (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    spotifyAccessToken = data.access_token;
+    // Guardar expiry (1 hora menos 5 minutos de margen)
+    spotifyTokenExpiry = Date.now() + ((data.expires_in - 300) * 1000);
+
+    console.log('✅ [Spotify] Access token obtenido');
+    return spotifyAccessToken;
+  } catch (error) {
+    console.error('❌ [Spotify] Error obteniendo access token:', error.message);
+    throw error;
+  }
+}
+
 /**
  * Detecta si una URL es de Spotify
  * @param {string} url - URL a verificar
@@ -105,7 +163,7 @@ async function getSpotifyTrackInfo(trackId) {
 }
 
 /**
- * Obtiene información de una playlist/album de Spotify usando el HTML público
+ * Obtiene información de una playlist/album de Spotify usando la API oficial
  * @param {string} playlistId - ID de la playlist
  * @param {string} type - 'playlist' o 'album'
  * @returns {Promise<Array>} Array de {title, artist}
@@ -113,38 +171,44 @@ async function getSpotifyTrackInfo(trackId) {
 async function getSpotifyPlaylist(playlistId, type = 'playlist') {
   try {
     const url = `https://open.spotify.com/${type}/${playlistId}`;
-    console.log(`🔍 [Spotify] Obteniendo ${type}: ${url}`);
+    console.log(`🔍 [Spotify] Obteniendo ${type} usando API oficial: ${url}`);
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
-    });
+    // Obtener access token
+    const accessToken = await getSpotifyAccessToken();
 
-    if (!response.ok) {
-      throw new Error(`Spotify returned ${response.status}`);
-    }
-
-    const html = await response.text();
-
-    // MÉTODO 1: Intentar extraer del script #initial-state
     let tracks = [];
-    const initialStateMatch = html.match(/<script id="initial-state" type="text\/plain">(.*?)<\/script>/s);
+    let nextUrl = null;
 
-    if (initialStateMatch) {
-      try {
-        console.log(`✅ [Spotify] Encontrado initial-state script`);
-        const jsonData = JSON.parse(initialStateMatch[1]);
-        const items = type === 'playlist'
-          ? jsonData?.data?.playlistV2?.content?.items || []
-          : jsonData?.data?.album?.tracks?.items || [];
+    // Endpoint según el tipo
+    if (type === 'playlist') {
+      // Obtener tracks de playlist (paginado de 100 en 100)
+      let offset = 0;
+      const limit = 100;
 
-        for (const item of items) {
-          const track = item.itemV2?.data || item.track;
-          if (!track) continue;
+      do {
+        const apiUrl = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=${limit}&offset=${offset}`;
+        console.log(`📥 [Spotify] Obteniendo tracks ${offset + 1}-${offset + limit}...`);
 
-          const artists = track.artists?.items || track.artists || [];
-          const artistNames = artists.map(a => a.profile?.name || a.name).filter(Boolean);
+        const response = await fetch(apiUrl, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Spotify API error (${response.status}): ${errorText}`);
+        }
+
+        const data = await response.json();
+
+        // Extraer tracks
+        for (const item of data.items || []) {
+          if (!item.track) continue;
+
+          const track = item.track;
+          const artists = track.artists || [];
+          const artistNames = artists.map(a => a.name).filter(Boolean);
           const title = track.name;
 
           if (title && artistNames.length > 0) {
@@ -155,96 +219,54 @@ async function getSpotifyPlaylist(playlistId, type = 'playlist') {
             });
           }
         }
-      } catch (parseError) {
-        console.warn(`⚠️ [Spotify] Error parseando initial-state:`, parseError.message);
+
+        // Verificar si hay más páginas
+        if (data.next && tracks.length < CONSTANTS.MUSIC.MAX_PLAYLIST_SIZE) {
+          offset += limit;
+        } else {
+          nextUrl = null;
+        }
+      } while (nextUrl && tracks.length < CONSTANTS.MUSIC.MAX_PLAYLIST_SIZE);
+
+    } else if (type === 'album') {
+      // Obtener tracks de album
+      const apiUrl = `https://api.spotify.com/v1/albums/${playlistId}/tracks?limit=50`;
+      console.log(`📥 [Spotify] Obteniendo tracks del album...`);
+
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Spotify API error (${response.status}): ${errorText}`);
       }
-    }
 
-    // MÉTODO 2: Si el método 1 falló, intentar extraer del script __NEXT_DATA__
-    if (tracks.length === 0) {
-      console.log(`🔄 [Spotify] Intentando método alternativo: __NEXT_DATA__`);
-      const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/s);
+      const data = await response.json();
 
-      if (nextDataMatch) {
-        try {
-          const jsonData = JSON.parse(nextDataMatch[1]);
+      // Extraer tracks
+      for (const track of data.items || []) {
+        const artists = track.artists || [];
+        const artistNames = artists.map(a => a.name).filter(Boolean);
+        const title = track.name;
 
-          // Navegar por la estructura de Next.js
-          const pageProps = jsonData?.props?.pageProps;
-          if (pageProps) {
-            // Para playlists
-            if (type === 'playlist' && pageProps.state?.data?.playlistV2?.content?.items) {
-              const items = pageProps.state.data.playlistV2.content.items;
-              for (const item of items) {
-                const track = item.itemV2?.data;
-                if (!track) continue;
-
-                const artists = track.artists?.items || [];
-                const artistNames = artists.map(a => a.profile?.name).filter(Boolean);
-                const title = track.name;
-
-                if (title && artistNames.length > 0) {
-                  tracks.push({
-                    title: `${artistNames.join(', ')} - ${title}`,
-                    artist: artistNames.join(', '),
-                    songName: title
-                  });
-                }
-              }
-            }
-
-            // Para albums
-            if (type === 'album' && pageProps.state?.data?.album?.tracks?.items) {
-              const items = pageProps.state.data.album.tracks.items;
-              for (const item of items) {
-                const track = item.track;
-                if (!track) continue;
-
-                const artists = track.artists || [];
-                const artistNames = artists.map(a => a.name).filter(Boolean);
-                const title = track.name;
-
-                if (title && artistNames.length > 0) {
-                  tracks.push({
-                    title: `${artistNames.join(', ')} - ${title}`,
-                    artist: artistNames.join(', '),
-                    songName: title
-                  });
-                }
-              }
-            }
-          }
-
-          console.log(`✅ [Spotify] Extraídos ${tracks.length} tracks usando __NEXT_DATA__`);
-        } catch (parseError) {
-          console.warn(`⚠️ [Spotify] Error parseando __NEXT_DATA__:`, parseError.message);
+        if (title && artistNames.length > 0) {
+          tracks.push({
+            title: `${artistNames.join(', ')} - ${title}`,
+            artist: artistNames.join(', '),
+            songName: title
+          });
         }
       }
     }
 
-    // MÉTODO 3: Si ambos métodos fallaron, intentar buscar tracks en el HTML directamente
     if (tracks.length === 0) {
-      console.log(`🔄 [Spotify] Intentando método alternativo: extracción directa de metadata`);
-
-      // Buscar meta tags que puedan contener información
-      const titleMatch = html.match(/<meta property="og:title" content="([^"]+)">/);
-      const descriptionMatch = html.match(/<meta property="og:description" content="([^"]+)">/);
-
-      if (titleMatch && descriptionMatch) {
-        console.log(`📋 [Spotify] Título de playlist: ${titleMatch[1]}`);
-        console.log(`📝 [Spotify] Descripción: ${descriptionMatch[1].substring(0, 100)}...`);
-
-        // Última opción: informar al usuario que debe usar la API de Spotify
-        throw new Error(
-          `No se pudo extraer las canciones de la playlist "${titleMatch[1]}". ` +
-          `Por favor, intenta usar una URL de YouTube en su lugar, o canciones individuales de Spotify.`
-        );
-      }
-
-      throw new Error('No se pudo extraer datos de la playlist usando ningún método disponible');
+      throw new Error(`La ${type} de Spotify está vacía o no contiene tracks válidos`);
     }
 
-    console.log(`✅ [Spotify] Extraídos ${tracks.length} tracks de ${type} ${playlistId}`);
+    console.log(`✅ [Spotify API] Extraídos ${tracks.length} tracks de ${type} ${playlistId}`);
     return tracks;
   } catch (error) {
     console.error(`❌ Error obteniendo ${type} de Spotify:`, error.message);
