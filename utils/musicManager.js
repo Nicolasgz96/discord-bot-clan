@@ -113,7 +113,13 @@ async function getSpotifyTrackInfo(trackId) {
 async function getSpotifyPlaylist(playlistId, type = 'playlist') {
   try {
     const url = `https://open.spotify.com/${type}/${playlistId}`;
-    const response = await fetch(url);
+    console.log(`🔍 [Spotify] Obteniendo ${type}: ${url}`);
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
 
     if (!response.ok) {
       throw new Error(`Spotify returned ${response.status}`);
@@ -121,33 +127,121 @@ async function getSpotifyPlaylist(playlistId, type = 'playlist') {
 
     const html = await response.text();
 
-    // Extraer el JSON embebido en el HTML
-    const match = html.match(/<script id="initial-state" type="text\/plain">(.*?)<\/script>/);
-    if (!match) {
-      throw new Error('No se pudo extraer datos de la playlist');
+    // MÉTODO 1: Intentar extraer del script #initial-state
+    let tracks = [];
+    const initialStateMatch = html.match(/<script id="initial-state" type="text\/plain">(.*?)<\/script>/s);
+
+    if (initialStateMatch) {
+      try {
+        console.log(`✅ [Spotify] Encontrado initial-state script`);
+        const jsonData = JSON.parse(initialStateMatch[1]);
+        const items = type === 'playlist'
+          ? jsonData?.data?.playlistV2?.content?.items || []
+          : jsonData?.data?.album?.tracks?.items || [];
+
+        for (const item of items) {
+          const track = item.itemV2?.data || item.track;
+          if (!track) continue;
+
+          const artists = track.artists?.items || track.artists || [];
+          const artistNames = artists.map(a => a.profile?.name || a.name).filter(Boolean);
+          const title = track.name;
+
+          if (title && artistNames.length > 0) {
+            tracks.push({
+              title: `${artistNames.join(', ')} - ${title}`,
+              artist: artistNames.join(', '),
+              songName: title
+            });
+          }
+        }
+      } catch (parseError) {
+        console.warn(`⚠️ [Spotify] Error parseando initial-state:`, parseError.message);
+      }
     }
 
-    const jsonData = JSON.parse(match[1]);
-    const items = type === 'playlist'
-      ? jsonData?.data?.playlistV2?.content?.items || []
-      : jsonData?.data?.album?.tracks?.items || [];
+    // MÉTODO 2: Si el método 1 falló, intentar extraer del script __NEXT_DATA__
+    if (tracks.length === 0) {
+      console.log(`🔄 [Spotify] Intentando método alternativo: __NEXT_DATA__`);
+      const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/s);
 
-    const tracks = [];
-    for (const item of items) {
-      const track = item.itemV2?.data || item.track;
-      if (!track) continue;
+      if (nextDataMatch) {
+        try {
+          const jsonData = JSON.parse(nextDataMatch[1]);
 
-      const artists = track.artists?.items || track.artists || [];
-      const artistNames = artists.map(a => a.profile?.name || a.name).filter(Boolean);
-      const title = track.name;
+          // Navegar por la estructura de Next.js
+          const pageProps = jsonData?.props?.pageProps;
+          if (pageProps) {
+            // Para playlists
+            if (type === 'playlist' && pageProps.state?.data?.playlistV2?.content?.items) {
+              const items = pageProps.state.data.playlistV2.content.items;
+              for (const item of items) {
+                const track = item.itemV2?.data;
+                if (!track) continue;
 
-      if (title && artistNames.length > 0) {
-        tracks.push({
-          title: `${artistNames.join(', ')} - ${title}`,
-          artist: artistNames.join(', '),
-          songName: title
-        });
+                const artists = track.artists?.items || [];
+                const artistNames = artists.map(a => a.profile?.name).filter(Boolean);
+                const title = track.name;
+
+                if (title && artistNames.length > 0) {
+                  tracks.push({
+                    title: `${artistNames.join(', ')} - ${title}`,
+                    artist: artistNames.join(', '),
+                    songName: title
+                  });
+                }
+              }
+            }
+
+            // Para albums
+            if (type === 'album' && pageProps.state?.data?.album?.tracks?.items) {
+              const items = pageProps.state.data.album.tracks.items;
+              for (const item of items) {
+                const track = item.track;
+                if (!track) continue;
+
+                const artists = track.artists || [];
+                const artistNames = artists.map(a => a.name).filter(Boolean);
+                const title = track.name;
+
+                if (title && artistNames.length > 0) {
+                  tracks.push({
+                    title: `${artistNames.join(', ')} - ${title}`,
+                    artist: artistNames.join(', '),
+                    songName: title
+                  });
+                }
+              }
+            }
+          }
+
+          console.log(`✅ [Spotify] Extraídos ${tracks.length} tracks usando __NEXT_DATA__`);
+        } catch (parseError) {
+          console.warn(`⚠️ [Spotify] Error parseando __NEXT_DATA__:`, parseError.message);
+        }
       }
+    }
+
+    // MÉTODO 3: Si ambos métodos fallaron, intentar buscar tracks en el HTML directamente
+    if (tracks.length === 0) {
+      console.log(`🔄 [Spotify] Intentando método alternativo: extracción directa de metadata`);
+
+      // Buscar meta tags que puedan contener información
+      const titleMatch = html.match(/<meta property="og:title" content="([^"]+)">/);
+      const descriptionMatch = html.match(/<meta property="og:description" content="([^"]+)">/);
+
+      if (titleMatch && descriptionMatch) {
+        console.log(`📋 [Spotify] Título de playlist: ${titleMatch[1]}`);
+        console.log(`📝 [Spotify] Descripción: ${descriptionMatch[1].substring(0, 100)}...`);
+
+        // Última opción: informar al usuario que debe usar la API de Spotify
+        throw new Error(
+          `No se pudo extraer las canciones de la playlist "${titleMatch[1]}". ` +
+          `Por favor, intenta usar una URL de YouTube en su lugar, o canciones individuales de Spotify.`
+        );
+      }
+
+      throw new Error('No se pudo extraer datos de la playlist usando ningún método disponible');
     }
 
     console.log(`✅ [Spotify] Extraídos ${tracks.length} tracks de ${type} ${playlistId}`);
