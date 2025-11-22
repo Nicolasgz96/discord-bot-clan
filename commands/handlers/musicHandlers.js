@@ -59,6 +59,63 @@ async function handlePlay(interaction) {
       return interaction.editReply(MESSAGES.MUSIC.NO_RESULTS);
     }
 
+    // Si es una playlist (URL con múltiples canciones), agregarlas todas a la cola
+    if (isUrl && songs.length > 1) {
+      // Es una playlist de YouTube o Spotify
+      await interaction.editReply(`${EMOJIS.MUSIC} Agregando ${songs.length} canciones a la cola...`);
+
+      // Conectar al canal de voz
+      if (!queue.connection) {
+        queue.connection = await musicManager.connectToChannel(voiceChannel);
+        queue.voiceChannel = voiceChannel;
+        queue.textChannel = interaction.channel;
+        musicManager.setupConnectionListeners(queue.connection, interaction.guild.id);
+      }
+
+      if (!queue.player) {
+        queue.player = createAudioPlayer();
+        queue.connection.subscribe(queue.player);
+        musicManager.setupPlayerListeners(queue);
+      }
+
+      // Agregar todas las canciones
+      let addedCount = 0;
+      for (const song of songs) {
+        // Verificar límite de cola
+        if (queue.songs.length >= CONSTANTS.MUSIC.MAX_QUEUE_SIZE) {
+          break;
+        }
+
+        // Verificar duración
+        if (song.duration && song.duration <= CONSTANTS.MUSIC.MAX_SONG_DURATION) {
+          song.requestedBy = interaction.user.id;
+          queue.addSong(song);
+          addedCount++;
+        }
+      }
+
+      const wasPlaying = queue.isPlaying;
+
+      if (!wasPlaying && addedCount > 0) {
+        musicManager.playSong(queue);
+      }
+
+      // Actualizar mensaje
+      const playlistType = query.includes('spotify.com') ? 'Spotify' : 'YouTube';
+      await interaction.editReply(
+        `${EMOJIS.SUCCESS} **Playlist de ${playlistType} agregada**\n` +
+        `${EMOJIS.MUSIC} ${addedCount} canciones añadidas a la cola\n` +
+        `${wasPlaying ? '🎵 Reproduciendo...' : '▶️ Iniciando reproducción...'}`
+      );
+
+      // Actualizar mensaje de la cola si existe
+      if (queue.queueMessageId) {
+        await musicManager.updateQueueMessage(queue);
+      }
+
+      return;
+    }
+
     // Si es una búsqueda por texto (no URL) y hay múltiples resultados, mostrar botones de selección
     if (!isUrl && songs.length > 1) {
       // Crear botones de selección

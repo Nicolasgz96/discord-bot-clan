@@ -50,6 +50,114 @@ try {
   console.warn('💡 yt-dlp está instalado pero yt-dlp-wrap no pudo inicializarlo');
 }
 
+// ==================== SPOTIFY SUPPORT ====================
+
+/**
+ * Detecta si una URL es de Spotify
+ * @param {string} url - URL a verificar
+ * @returns {Object|null} {type: 'track'|'playlist'|'album', id: string} o null
+ */
+function detectSpotifyURL(url) {
+  const trackMatch = url.match(/spotify\.com\/track\/([a-zA-Z0-9]+)/);
+  if (trackMatch) return { type: 'track', id: trackMatch[1] };
+
+  const playlistMatch = url.match(/spotify\.com\/playlist\/([a-zA-Z0-9]+)/);
+  if (playlistMatch) return { type: 'playlist', id: playlistMatch[1] };
+
+  const albumMatch = url.match(/spotify\.com\/album\/([a-zA-Z0-9]+)/);
+  if (albumMatch) return { type: 'album', id: albumMatch[1] };
+
+  return null;
+}
+
+/**
+ * Obtiene información de un track de Spotify usando embed
+ * @param {string} trackId - ID del track de Spotify
+ * @returns {Promise<Object>} {title, artist, duration}
+ */
+async function getSpotifyTrackInfo(trackId) {
+  try {
+    const embedUrl = `https://open.spotify.com/oembed?url=spotify:track:${trackId}`;
+    const response = await fetch(embedUrl);
+
+    if (!response.ok) {
+      throw new Error(`Spotify API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // El título viene como "Artista - Canción"
+    const fullTitle = data.title || '';
+    const parts = fullTitle.split(' - ');
+    const artist = parts[0] || 'Unknown Artist';
+    const title = parts.slice(1).join(' - ') || fullTitle;
+
+    return {
+      title: `${artist} - ${title}`,
+      artist,
+      songName: title,
+      spotifyUrl: `https://open.spotify.com/track/${trackId}`
+    };
+  } catch (error) {
+    console.error(`❌ Error obteniendo info de Spotify track ${trackId}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Obtiene información de una playlist/album de Spotify usando el HTML público
+ * @param {string} playlistId - ID de la playlist
+ * @param {string} type - 'playlist' o 'album'
+ * @returns {Promise<Array>} Array de {title, artist}
+ */
+async function getSpotifyPlaylist(playlistId, type = 'playlist') {
+  try {
+    const url = `https://open.spotify.com/${type}/${playlistId}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Spotify returned ${response.status}`);
+    }
+
+    const html = await response.text();
+
+    // Extraer el JSON embebido en el HTML
+    const match = html.match(/<script id="initial-state" type="text\/plain">(.*?)<\/script>/);
+    if (!match) {
+      throw new Error('No se pudo extraer datos de la playlist');
+    }
+
+    const jsonData = JSON.parse(match[1]);
+    const items = type === 'playlist'
+      ? jsonData?.data?.playlistV2?.content?.items || []
+      : jsonData?.data?.album?.tracks?.items || [];
+
+    const tracks = [];
+    for (const item of items) {
+      const track = item.itemV2?.data || item.track;
+      if (!track) continue;
+
+      const artists = track.artists?.items || track.artists || [];
+      const artistNames = artists.map(a => a.profile?.name || a.name).filter(Boolean);
+      const title = track.name;
+
+      if (title && artistNames.length > 0) {
+        tracks.push({
+          title: `${artistNames.join(', ')} - ${title}`,
+          artist: artistNames.join(', '),
+          songName: title
+        });
+      }
+    }
+
+    console.log(`✅ [Spotify] Extraídos ${tracks.length} tracks de ${type} ${playlistId}`);
+    return tracks;
+  } catch (error) {
+    console.error(`❌ Error obteniendo ${type} de Spotify:`, error.message);
+    throw error;
+  }
+}
+
 /**
  * Obtiene o crea la cola de un servidor
  * @param {string} guildId - ID del servidor
@@ -244,8 +352,8 @@ async function connectToChannel(voiceChannel) {
 }
 
 /**
- * Busca canciones en YouTube
- * @param {string} query - Término de búsqueda o URL
+ * Busca canciones en YouTube o Spotify
+ * @param {string} query - Término de búsqueda o URL (YouTube o Spotify)
  * @param {Object} options - Opciones de búsqueda
  * @returns {Promise<Array>} Array de resultados
  */
@@ -253,7 +361,89 @@ async function searchSongs(query, options = {}) {
   try {
     const limit = options.limit || CONSTANTS.MUSIC.SEARCH_RESULTS_LIMIT;
 
-    // Verificar si es una URL de YouTube
+    // ==================== SPOTIFY SUPPORT ====================
+    const spotifyInfo = detectSpotifyURL(query);
+    if (spotifyInfo) {
+      console.log(`🎵 [Spotify] Detectado ${spotifyInfo.type}: ${spotifyInfo.id}`);
+
+      if (spotifyInfo.type === 'track') {
+        // Track individual de Spotify
+        const trackInfo = await getSpotifyTrackInfo(spotifyInfo.id);
+        console.log(`🔍 [Spotify] Buscando en YouTube: "${trackInfo.title}"`);
+
+        // Buscar en YouTube
+        const searchResults = await playdl.search(trackInfo.title, {
+          limit: 1,
+          source: { youtube: 'video' }
+        });
+
+        if (searchResults.length === 0) {
+          throw new Error(`No se encontró "${trackInfo.title}" en YouTube`);
+        }
+
+        const video = searchResults[0];
+        return [{
+          title: video.title,
+          url: video.url,
+          duration: video.durationInSec || 0,
+          thumbnail: video.thumbnails[0]?.url || null,
+          channel: video.channel?.name || 'Desconocido',
+          spotifyUrl: trackInfo.spotifyUrl
+        }];
+
+      } else if (spotifyInfo.type === 'playlist' || spotifyInfo.type === 'album') {
+        // Playlist o album de Spotify
+        const tracks = await getSpotifyPlaylist(spotifyInfo.id, spotifyInfo.type);
+
+        if (tracks.length === 0) {
+          throw new Error(`La ${spotifyInfo.type} de Spotify está vacía`);
+        }
+
+        console.log(`🔍 [Spotify] Buscando ${tracks.length} canciones en YouTube...`);
+
+        // Limitar a MAX_PLAYLIST_SIZE
+        const limitedTracks = tracks.slice(0, CONSTANTS.MUSIC.MAX_PLAYLIST_SIZE);
+        const results = [];
+
+        // Buscar cada track en YouTube (con límite de concurrencia)
+        for (let i = 0; i < limitedTracks.length; i++) {
+          const track = limitedTracks[i];
+          console.log(`🔍 [${i + 1}/${limitedTracks.length}] Buscando: ${track.title}`);
+
+          try {
+            const searchResults = await playdl.search(track.title, {
+              limit: 1,
+              source: { youtube: 'video' }
+            });
+
+            if (searchResults.length > 0) {
+              const video = searchResults[0];
+              results.push({
+                title: video.title,
+                url: video.url,
+                duration: video.durationInSec || 0,
+                thumbnail: video.thumbnails[0]?.url || null,
+                channel: video.channel?.name || 'Desconocido'
+              });
+            } else {
+              console.warn(`⚠️ No se encontró en YouTube: ${track.title}`);
+            }
+
+            // Pequeño delay para no saturar YouTube
+            if (i < limitedTracks.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 200));
+            }
+          } catch (error) {
+            console.error(`❌ Error buscando "${track.title}":`, error.message);
+          }
+        }
+
+        console.log(`✅ [Spotify] ${results.length}/${limitedTracks.length} canciones encontradas en YouTube`);
+        return results;
+      }
+    }
+
+    // ==================== YOUTUBE SUPPORT ====================
     const urlValidation = playdl.yt_validate(query);
     const isURL = urlValidation !== false;
 
