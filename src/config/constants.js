@@ -964,7 +964,7 @@ const CONSTANTS = {
     DISCONNECT_DELAY: 5,          // Segundos antes de desconectar del canal
 
     // Playlists de usuario
-    MAX_PLAYLIST_SIZE: 50,        // Canciones por playlist
+    MAX_PLAYLIST_SIZE: 100,       // Canciones por playlist (máximo permitido)
     MAX_PLAYLISTS_PER_USER: 20,   // Playlists por usuario
 
     // Panel de música (actualización)

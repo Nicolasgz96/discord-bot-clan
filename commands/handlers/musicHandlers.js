@@ -62,7 +62,10 @@ async function handlePlay(interaction) {
     // Si es una playlist (URL con múltiples canciones), agregarlas todas a la cola
     if (isUrl && songs.length > 1) {
       // Es una playlist de YouTube o Spotify
-      await interaction.editReply(`${EMOJIS.MUSIC} Agregando ${songs.length} canciones a la cola...`);
+      const isSpotify = query.includes('spotify.com');
+      const playlistType = isSpotify ? 'Spotify' : 'YouTube';
+
+      await interaction.editReply(`${EMOJIS.MUSIC} Procesando playlist de ${playlistType}...`);
 
       // Conectar al canal de voz
       if (!queue.connection) {
@@ -78,40 +81,57 @@ async function handlePlay(interaction) {
         musicManager.setupPlayerListeners(queue);
       }
 
-      // Agregar todas las canciones
-      let addedCount = 0;
-      for (const song of songs) {
-        // Verificar límite de cola
-        if (queue.songs.length >= CONSTANTS.MUSIC.MAX_QUEUE_SIZE) {
-          break;
-        }
-
-        // Verificar duración
-        if (song.duration && song.duration <= CONSTANTS.MUSIC.MAX_SONG_DURATION) {
-          song.requestedBy = interaction.user.id;
-          queue.addSong(song);
-          addedCount++;
-        }
-      }
-
       const wasPlaying = queue.isPlaying;
 
-      if (!wasPlaying && addedCount > 0) {
-        musicManager.playSong(queue);
+      // Agregar primera canción y empezar inmediatamente
+      const firstSong = songs[0];
+      if (firstSong && firstSong.duration <= CONSTANTS.MUSIC.MAX_SONG_DURATION) {
+        firstSong.requestedBy = interaction.user.id;
+        queue.addSong(firstSong);
+
+        if (!wasPlaying) {
+          musicManager.playSong(queue);
+        }
+
+        await interaction.editReply(
+          `${EMOJIS.SUCCESS} **Reproduciendo primera canción**\n` +
+          `🎵 ${firstSong.title}\n` +
+          `⏳ Cargando ${songs.length - 1} canciones más en segundo plano...`
+        );
       }
 
-      // Actualizar mensaje
-      const playlistType = query.includes('spotify.com') ? 'Spotify' : 'YouTube';
-      await interaction.editReply(
-        `${EMOJIS.SUCCESS} **Playlist de ${playlistType} agregada**\n` +
-        `${EMOJIS.MUSIC} ${addedCount} canciones añadidas a la cola\n` +
-        `${wasPlaying ? '🎵 Reproduciendo...' : '▶️ Iniciando reproducción...'}`
-      );
+      // Agregar el resto de canciones en segundo plano (sin bloquear)
+      let addedCount = 1; // Ya agregamos la primera
+      (async () => {
+        for (let i = 1; i < songs.length; i++) {
+          const song = songs[i];
 
-      // Actualizar mensaje de la cola si existe
-      if (queue.queueMessageId) {
-        await musicManager.updateQueueMessage(queue);
-      }
+          // Verificar límite de cola
+          if (queue.songs.length >= CONSTANTS.MUSIC.MAX_QUEUE_SIZE) {
+            console.log(`⚠️ [Playlist] Límite de cola alcanzado (${CONSTANTS.MUSIC.MAX_QUEUE_SIZE}), omitiendo canciones restantes`);
+            break;
+          }
+
+          // Verificar duración
+          if (song.duration && song.duration <= CONSTANTS.MUSIC.MAX_SONG_DURATION) {
+            song.requestedBy = interaction.user.id;
+            queue.addSong(song);
+            addedCount++;
+          }
+
+          // Actualizar mensaje de la cola cada 5 canciones
+          if (addedCount % 5 === 0 && queue.queueMessageId) {
+            await musicManager.updateQueueMessage(queue).catch(() => {});
+          }
+        }
+
+        console.log(`✅ [Playlist] ${addedCount}/${songs.length} canciones agregadas de ${playlistType}`);
+
+        // Actualización final
+        if (queue.queueMessageId) {
+          await musicManager.updateQueueMessage(queue).catch(() => {});
+        }
+      })();
 
       return;
     }
